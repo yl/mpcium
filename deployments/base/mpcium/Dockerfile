@@ -43,8 +43,9 @@ RUN echo '#!/bin/sh' > /app/entrypoint.sh && \
     echo 'exec ./mpcium start --name "$NODE_NAME" "$@"' >> /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
 
-# Create necessary directories
+# Create necessary directories with proper permissions for volume mounting
 RUN mkdir -p db backups identity certs && \
+    chmod 777 db backups && \
     chown -R mpcium:mpcium /app
 
 # Switch to non-root user

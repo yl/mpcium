@@ -110,7 +110,7 @@ select_deployment_type() {
                 ;;
             2)
                 log_info "Selected: Docker deployment"
-                NATS_URL="nats://nats:4222"
+                NATS_URL="nats://nats-server:4222"
                 CONSUL_ADDRESS="consul:8500"
                 DEPLOYMENT_TYPE="docker"
                 break
@@ -300,27 +300,39 @@ distribute_identity_files() {
     
     log_success "Identity files distributed to all nodes"
 }
-
-register_peers_to_consul() {
-    log_info "Registering peers to Consul..."
+fix_file_permissions() {
+    log_info "Fixing file permissions for Docker compatibility..."
     
     cd "$BASE_DIR"
     
-    # Check if Consul is accessible
-    if ! curl -s "$CONSUL_ADDRESS/v1/status/leader" > /dev/null; then
-        log_warning "Consul not accessible at $CONSUL_ADDRESS"
-        log_warning "Please ensure Consul is running and register peers manually:"
-        log_warning "  mpcium-cli register-peers"
-        return
+    # Fix permissions for all identity files
+    for i in $(seq 0 $(($NUM_NODES - 1))); do
+        NODE_DIR="node$i"
+        if [ -d "$NODE_DIR/identity" ]; then
+            log_info "Fixing permissions for $NODE_DIR/identity/*"
+            chmod -R 644 "$NODE_DIR/identity/"*
+            log_success "Fixed permissions for $NODE_DIR"
+        fi
+    done
+    
+    # Also fix permissions for event initiator files
+    if [ -f "event_initiator.identity.json" ]; then
+        chmod 644 event_initiator.identity.json
+        log_info "Fixed permissions for event_initiator.identity.json"
     fi
     
-    # Register peers
-    mpcium-cli register-peers
-    log_success "Peers registered to Consul"
+    if [ -f "event_initiator.key" ]; then
+        chmod 644 event_initiator.key
+        log_info "Fixed permissions for event_initiator.key"
+    fi
+    
+    if [ -f "event_initiator.key.age" ]; then
+        chmod 644 event_initiator.key.age
+        log_info "Fixed permissions for event_initiator.key.age"
+    fi
+    
+    log_success "File permissions fixed for Docker compatibility"
 }
-
-
-
 print_summary() {
     echo
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
@@ -449,7 +461,7 @@ main() {
     create_node_directories
     generate_node_identities
     distribute_identity_files
-    register_peers_to_consul
+    fix_file_permissions
     print_summary
 }
 
