@@ -635,18 +635,21 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 			KeyType:      msg.KeyType,
 			ResultType:   event.ResultTypeSuccess,
 		}
-
-		var wg sync.WaitGroup
 		ctx := context.Background()
-
-		ec.warmUpSession()
-
+		var wg sync.WaitGroup
 		if oldSession != nil {
-			ctxOld, doneOld := context.WithCancel(ctx)
 			oldSession.Init()
 			oldSession.ListenToIncomingMessageAsync()
-			go oldSession.Reshare(doneOld)
+		}
+		if newSession != nil {
+			newSession.Init()
+			newSession.ListenToIncomingMessageAsync()
+		}
 
+		ec.warmUpSession()
+		if oldSession != nil {
+			ctxOld, doneOld := context.WithCancel(ctx)
+			go oldSession.Reshare(doneOld)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -657,7 +660,7 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 					case err := <-oldSession.ErrChan():
 						logger.Error("Old reshare session error", err)
 						ec.handleReshareSessionError(walletID, keyType, msg.NewThreshold, err, "Old reshare session error", natMsg)
-						doneOld() // Cancel the context to stop this session
+						doneOld()
 						return
 					}
 				}
@@ -666,10 +669,7 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 
 		if newSession != nil {
 			ctxNew, doneNew := context.WithCancel(ctx)
-			newSession.Init()
-			newSession.ListenToIncomingMessageAsync()
 			go newSession.Reshare(doneNew)
-
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -681,7 +681,7 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 					case err := <-newSession.ErrChan():
 						logger.Error("New reshare session error", err)
 						ec.handleReshareSessionError(walletID, keyType, msg.NewThreshold, err, "New reshare session error", natMsg)
-						doneNew() // Cancel the context to stop this session
+						doneNew()
 						return
 					}
 				}
@@ -689,7 +689,6 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 		}
 
 		wg.Wait()
-
 		logger.Info("Reshare session finished", "walletID", walletID, "pubKey", fmt.Sprintf("%x", successEvent.PubKey))
 
 		if newSession != nil {
