@@ -603,7 +603,6 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 			return ec.node.CreateReshareSession(
 				sessionType,
 				walletID,
-				ec.mpcThreshold,
 				msg.NewThreshold,
 				msg.NodeIDs,
 				isNewPeer,
