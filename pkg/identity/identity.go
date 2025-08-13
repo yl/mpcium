@@ -2,7 +2,6 @@ package identity
 
 import (
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -293,14 +292,6 @@ func (s *fileStore) VerifyMessage(msg *types.TssMessage) error {
 	}
 
 	return nil
-}
-
-func generateRandom(nonceSize int) ([]byte, error) {
-	nonce := make([]byte, nonceSize)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return nonce, nil
 }
 
 func (s *fileStore) EncryptMessage(plaintext []byte, peerID string) ([]byte, error) {
