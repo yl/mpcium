@@ -628,14 +628,16 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 			return
 		}
 
+		ctx := context.Background()
+		var wg sync.WaitGroup
+
 		successEvent := &event.ResharingResultEvent{
 			WalletID:     walletID,
 			NewThreshold: msg.NewThreshold,
 			KeyType:      msg.KeyType,
 			ResultType:   event.ResultTypeSuccess,
 		}
-		ctx := context.Background()
-		var wg sync.WaitGroup
+
 		if oldSession != nil {
 			err := oldSession.Init()
 			if err != nil {
@@ -644,6 +646,7 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 			}
 			oldSession.ListenToIncomingMessageAsync()
 		}
+
 		if newSession != nil {
 			err := newSession.Init()
 			if err != nil {
@@ -651,12 +654,18 @@ func (ec *eventConsumer) consumeReshareEvent() error {
 				return
 			}
 			newSession.ListenToIncomingMessageAsync()
+			// In resharing process, we need to ensure that the new session is aware of the old committee peers.
+			// Then new committee peers can start listening to the old committee peers
+			// and thus enable receiving direct messages from them.
+			extraOldCommiteePeers := newSession.GetLegacyCommitteePeers()
+			newSession.ListenToPeersAsync(extraOldCommiteePeers)
 		}
 
 		ec.warmUpSession()
 		if oldSession != nil {
 			ctxOld, doneOld := context.WithCancel(ctx)
 			go oldSession.Reshare(doneOld)
+
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

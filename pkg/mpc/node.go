@@ -1,12 +1,9 @@
 package mpc
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/bnb-chain/tss-lib/v2/ecdsa/keygen"
@@ -17,7 +14,6 @@ import (
 	"github.com/fystack/mpcium/pkg/kvstore"
 	"github.com/fystack/mpcium/pkg/logger"
 	"github.com/fystack/mpcium/pkg/messaging"
-	"github.com/google/uuid"
 )
 
 const (
@@ -43,18 +39,7 @@ type Node struct {
 	identityStore  identity.Store
 
 	peerRegistry PeerRegistry
-}
-
-func PartyIDToRoutingDest(partyID *tss.PartyID) string {
-	return string(partyID.KeyInt().Bytes())
-}
-
-func ComparePartyIDs(x, y *tss.PartyID) bool {
-	return bytes.Equal(x.KeyInt().Bytes(), y.KeyInt().Bytes())
-}
-
-func ComposeReadyKey(nodeID string) string {
-	return fmt.Sprintf("ready/%s", nodeID)
+	ecdhSession  ECDHSession
 }
 
 func NewNode(
@@ -70,6 +55,11 @@ func NewNode(
 	start := time.Now()
 	elapsed := time.Since(start)
 	logger.Info("Starting new node, preparams is generated successfully!", "elapsed", elapsed.Milliseconds())
+	// Each node initiates the DH key exchange listener at the beginning and invoke message sending when all peers are ready
+	dhSession := NewECDHSession(nodeID, peerIDs, pubSub, identityStore)
+	if err := dhSession.StartKeyExchange(); err != nil {
+		logger.Fatal("Failed to start DH key exchange", err)
+	}
 
 	node := &Node{
 		nodeID:        nodeID,
@@ -80,10 +70,17 @@ func NewNode(
 		keyinfoStore:  keyinfoStore,
 		peerRegistry:  peerRegistry,
 		identityStore: identityStore,
+		ecdhSession:   dhSession,
 	}
 	node.ecdsaPreParams = node.generatePreParams()
 
-	go peerRegistry.WatchPeersReady()
+	ecdhTask := func() {
+		if err := dhSession.BroadcastPublicKey(); err != nil {
+			logger.Fatal("DH key broadcast failed", err)
+		}
+	}
+
+	go peerRegistry.WatchPeersReady(ecdhTask)
 	return node
 }
 
@@ -417,44 +414,8 @@ func (p *Node) CreateReshareSession(
 	}
 }
 
-// generatePartyIDs generates the party IDs for the given purpose and version
-// It returns the self party ID and all party IDs
-// It also sorts the party IDs in place
-func (n *Node) generatePartyIDs(
-	label string,
-	readyPeerIDs []string,
-	version int,
-) (self *tss.PartyID, all []*tss.PartyID) {
-	// Pre-allocate slice with exact size needed
-	partyIDs := make([]*tss.PartyID, 0, len(readyPeerIDs))
-
-	// Create all party IDs in one pass
-	for _, peerID := range readyPeerIDs {
-		partyID := createPartyID(peerID, label, version)
-		if peerID == n.nodeID {
-			self = partyID
-		}
-		partyIDs = append(partyIDs, partyID)
-	}
-
-	// Sort party IDs in place
-	all = tss.SortPartyIDs(partyIDs, 0)
-	return
-}
-
-// createPartyID creates a new party ID for the given node ID, label and version
-// It returns the party ID: random string
-// Moniker: for routing messages
-// Key: for mpc internal use (need persistent storage)
-func createPartyID(nodeID string, label string, version int) *tss.PartyID {
-	partyID := uuid.NewString()
-	var key *big.Int
-	if version == BackwardCompatibleVersion {
-		key = big.NewInt(0).SetBytes([]byte(nodeID))
-	} else {
-		key = big.NewInt(0).SetBytes([]byte(nodeID + ":" + strconv.Itoa(version)))
-	}
-	return tss.NewPartyID(partyID, label, key)
+func ComposeReadyKey(nodeID string) string {
+	return fmt.Sprintf("ready/%s", nodeID)
 }
 
 func (p *Node) Close() {
@@ -462,6 +423,14 @@ func (p *Node) Close() {
 	if err != nil {
 		logger.Error("Resign failed", err)
 	}
+}
+
+func (p *Node) GetECDHSession() ECDHSession {
+	return p.ecdhSession
+}
+
+func (p *Node) GetDHSession() ECDHSession {
+	return p.ecdhSession
 }
 
 func (p *Node) generatePreParams() []*keygen.LocalPreParams {

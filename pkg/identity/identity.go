@@ -2,6 +2,7 @@ package identity
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/fystack/mpcium/pkg/common/pathutil"
+	"github.com/fystack/mpcium/pkg/encryption"
 	"github.com/fystack/mpcium/pkg/logger"
 	"github.com/fystack/mpcium/pkg/types"
 	"github.com/spf13/viper"
@@ -37,6 +39,16 @@ type Store interface {
 	VerifyInitiatorMessage(msg types.InitiatorMessage) error
 	SignMessage(msg *types.TssMessage) ([]byte, error)
 	VerifyMessage(msg *types.TssMessage) error
+
+	SignEcdhMessage(msg *types.ECDHMessage) ([]byte, error)
+	VerifySignature(msg *types.ECDHMessage) error
+
+	SetSymmetricKey(peerID string, key []byte)
+	GetSymmetricKey(peerID string) ([]byte, error)
+	CheckSymmetricKeyComplete(desired int) bool
+
+	EncryptMessage(plaintext []byte, peerID string) ([]byte, error)
+	DecryptMessage(cipher []byte, peerID string) ([]byte, error)
 }
 
 // fileStore implements the Store interface using the filesystem
@@ -48,9 +60,9 @@ type fileStore struct {
 	publicKeys map[string][]byte
 	mu         sync.RWMutex
 
-	// Cached private key
 	privateKey      []byte
 	initiatorPubKey []byte
+	symmetricKeys   map[string][]byte
 }
 
 // NewFileStore creates a new identity store
@@ -97,6 +109,7 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 		publicKeys:      make(map[string][]byte),
 		privateKey:      privateKey,
 		initiatorPubKey: initiatorPubKey,
+		symmetricKeys:   make(map[string][]byte),
 	}
 
 	// Check that each node in peers.json has an identity file
@@ -207,6 +220,29 @@ func loadPrivateKey(identityDir, nodeName string, decrypt bool) (string, error) 
 	}
 }
 
+// Set SymmetricKey: adds or updates a symmetric key for a given peer ID.
+func (s *fileStore) SetSymmetricKey(peerID string, key []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.symmetricKeys[peerID] = key
+}
+
+// Get SymmetricKey: retrieves a peer node's dh symmetric-key by its ID
+func (s *fileStore) GetSymmetricKey(peerID string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if key, exists := s.symmetricKeys[peerID]; exists {
+		return key, nil
+	}
+
+	return nil, fmt.Errorf("SymmetricKey key not found for node ID: %s", peerID)
+}
+
+func (s *fileStore) CheckSymmetricKeyComplete(desired int) bool {
+	return len(s.symmetricKeys) == desired
+}
+
 // GetPublicKey retrieves a node's public key by its ID
 func (s *fileStore) GetPublicKey(nodeID string) ([]byte, error) {
 	s.mu.RLock()
@@ -253,6 +289,78 @@ func (s *fileStore) VerifyMessage(msg *types.TssMessage) error {
 
 	// Verify the signature
 	if !ed25519.Verify(publicKey, msgBytes, msg.Signature) {
+		return fmt.Errorf("invalid signature")
+	}
+
+	return nil
+}
+
+func generateRandom(nonceSize int) ([]byte, error) {
+	nonce := make([]byte, nonceSize)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return nonce, nil
+}
+
+func (s *fileStore) EncryptMessage(plaintext []byte, peerID string) ([]byte, error) {
+	key, err := s.GetSymmetricKey(peerID)
+	if err != nil {
+		return nil, err
+	}
+
+	if key == nil {
+		return nil, fmt.Errorf("no symmetric key for peer %s", peerID)
+	}
+
+	return encryption.EncryptAESGCMWithNonceEmbed(plaintext, key)
+}
+
+func (s *fileStore) DecryptMessage(cipher []byte, peerID string) ([]byte, error) {
+	key, err := s.GetSymmetricKey(peerID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if key == nil {
+		return nil, fmt.Errorf("no symmetric key for peer %s", peerID)
+	}
+	return encryption.DecryptAESGCMWithNonceEmbed(cipher, key)
+}
+
+// Sign ECDH key exchange message
+func (s *fileStore) SignEcdhMessage(msg *types.ECDHMessage) ([]byte, error) {
+	// Get deterministic bytes for signing
+	msgBytes, err := msg.MarshalForSigning()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal message for signing: %w", err)
+	}
+
+	signature := ed25519.Sign(s.privateKey, msgBytes)
+	return signature, nil
+}
+
+// Verify ECDH key exchange message
+func (s *fileStore) VerifySignature(msg *types.ECDHMessage) error {
+	if msg.Signature == nil {
+		return fmt.Errorf("ECDH message has no signature")
+	}
+
+	// Get the sender's public key
+	senderPk, err := s.GetPublicKey(msg.From)
+	if err != nil {
+		return fmt.Errorf("failed to get sender's public key: %w", err)
+	}
+
+	// Get deterministic bytes for verification
+	msgBytes, err := msg.MarshalForSigning()
+	if err != nil {
+		return fmt.Errorf("failed to marshal message for verification: %w", err)
+	}
+
+	// Verify the signature
+	if !ed25519.Verify(senderPk, msgBytes, msg.Signature) {
 		return fmt.Errorf("invalid signature")
 	}
 
