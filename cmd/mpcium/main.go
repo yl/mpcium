@@ -162,7 +162,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	logger.Info("Node is running", "ID", nodeID, "name", nodeName)
 
 	peerNodeIDs := GetPeerIDs(peers)
-	peerRegistry := mpc.NewRegistry(nodeID, peerNodeIDs, consulClient.KV())
+	peerRegistry := mpc.NewRegistry(nodeID, peerNodeIDs, consulClient.KV(), directMessaging)
 
 	mpcNode := mpc.NewNode(
 		nodeID,
@@ -231,6 +231,11 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 		if err := ecdhSession.Close(); err != nil {
 			logger.Error("Failed to close ECDH session", err)
+		}
+
+		err := natsConn.Drain()
+		if err != nil {
+			logger.Error("Failed to drain NATS connection", err)
 		}
 	}()
 

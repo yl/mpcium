@@ -90,10 +90,10 @@ func (sc *keygenConsumer) Run(ctx context.Context) error {
 		sc.handleKeygenEvent,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to signing events: %w", err)
+		return fmt.Errorf("failed to subscribe to keygen events: %w", err)
 	}
 	sc.jsSub = sub
-	logger.Info("SigningConsumer: Subscribed to signing events")
+	logger.Info("SigningConsumer: Subscribed to keygen events")
 
 	// Block until context cancellation.
 	<-ctx.Done()

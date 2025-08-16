@@ -13,7 +13,15 @@ import (
 type DirectMessaging interface {
 	Listen(topic string, handler func(data []byte)) (Subscription, error)
 	SendToOther(topic string, data []byte) error
+	SendToOtherWithRetry(topic string, data []byte, config RetryConfig) error
 	SendToSelf(topic string, data []byte) error
+}
+
+type RetryConfig struct {
+	RetryAttempt       uint
+	ExponentialBackoff bool
+	Delay              time.Duration
+	OnRetry            func(n uint, err error)
 }
 
 type natsDirectMessaging struct {
@@ -65,6 +73,36 @@ func (d *natsDirectMessaging) SendToOther(topic string, message []byte) error {
 	)
 }
 
+func (d *natsDirectMessaging) SendToOtherWithRetry(topic string, message []byte, config RetryConfig) error {
+	opts := []retry.Option{
+		retry.MaxJitter(80 * time.Millisecond),
+	}
+
+	if config.RetryAttempt > 0 {
+		opts = append(opts, retry.Attempts(config.RetryAttempt))
+	}
+	if config.ExponentialBackoff {
+		opts = append(opts, retry.DelayType(retry.BackOffDelay))
+	}
+	if config.Delay > 0 {
+		opts = append(opts, retry.Delay(config.Delay))
+	}
+	if config.OnRetry != nil {
+		opts = append(opts, retry.OnRetry(config.OnRetry))
+	}
+
+	return retry.Do(
+		func() error {
+			_, err := d.natsConn.Request(topic, message, 3*time.Second)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+		opts...,
+	)
+}
+
 func (d *natsDirectMessaging) Listen(topic string, handler func(data []byte)) (Subscription, error) {
 	sub, err := d.natsConn.Subscribe(topic, func(m *nats.Msg) {
 		handler(m.Data)
@@ -74,6 +112,14 @@ func (d *natsDirectMessaging) Listen(topic string, handler func(data []byte)) (S
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if err := d.natsConn.Flush(); err != nil {
+		err := sub.Unsubscribe()
+		if err != nil {
+			logger.Error("Failed to unsubscribe", err)
+		}
+		return nil, fmt.Errorf("flush after subscribe failed: %w", err)
 	}
 
 	d.mu.Lock()
