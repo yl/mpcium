@@ -57,8 +57,8 @@ func NewNode(
 	logger.Info("Starting new node, preparams is generated successfully!", "elapsed", elapsed.Milliseconds())
 	// Each node initiates the DH key exchange listener at the beginning and invoke message sending when all peers are ready
 	dhSession := NewECDHSession(nodeID, peerIDs, pubSub, identityStore)
-	if err := dhSession.StartKeyExchange(); err != nil {
-		logger.Fatal("Failed to start DH key exchange", err)
+	if err := dhSession.ListenKeyExchange(); err != nil {
+		logger.Fatal("Failed to listen to DH key exchange", err)
 	}
 
 	node := &Node{
@@ -74,13 +74,18 @@ func NewNode(
 	}
 	node.ecdsaPreParams = node.generatePreParams()
 
-	ecdhTask := func() {
-		if err := dhSession.BroadcastPublicKey(); err != nil {
-			logger.Fatal("DH key broadcast failed", err)
+	// we define two types of tasks, initTask and resetTask
+	ecdhTasks := func(isInit bool) {
+		if isInit {
+			if err := dhSession.BroadcastPublicKey(); err != nil {
+				logger.Fatal("DH key broadcast failed", err)
+			}
+		} else {
+			dhSession.ResetLocalKeys()
 		}
 	}
 
-	go peerRegistry.WatchPeersReady(ecdhTask)
+	go peerRegistry.WatchPeersReady(ecdhTasks)
 	return node
 }
 
@@ -426,10 +431,6 @@ func (p *Node) Close() {
 }
 
 func (p *Node) GetECDHSession() ECDHSession {
-	return p.ecdhSession
-}
-
-func (p *Node) GetDHSession() ECDHSession {
 	return p.ecdhSession
 }
 

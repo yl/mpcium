@@ -21,7 +21,7 @@ const (
 type PeerRegistry interface {
 	Ready() error
 	ArePeersReady() bool
-	WatchPeersReady(callback func())
+	WatchPeersReady(callback func(bool))
 	// Resign is called by the node when it is going to shutdown
 	Resign() error
 	GetReadyPeersCount() int64
@@ -71,7 +71,7 @@ func (r *registry) readyKey(nodeID string) string {
 	return fmt.Sprintf("ready/%s", nodeID)
 }
 
-func (r *registry) registerReadyPairs(peerIDs []string, callback func()) {
+func (r *registry) registerReadyPairs(peerIDs []string, callback func(isInit bool)) {
 	for _, peerID := range peerIDs {
 		ready, exist := r.readyMap[peerID]
 		if !exist {
@@ -89,9 +89,10 @@ func (r *registry) registerReadyPairs(peerIDs []string, callback func()) {
 		r.mu.Lock()
 		r.ready = true
 		r.mu.Unlock()
-		time.AfterFunc(5*time.Second, callback)
+		time.AfterFunc(5*time.Second, func() {
+			callback(true)
+		})
 	}
-
 }
 
 // Ready is called by the node when it complete generate preparams and starting to accept
@@ -122,9 +123,10 @@ func (r *registry) composeHealthCheckTopic(nodeID string) string {
 	return fmt.Sprintf("healthcheck:%s", nodeID)
 }
 
-func (r *registry) WatchPeersReady(callback func()) {
+func (r *registry) WatchPeersReady(callback func(isInit bool)) {
+	go r.checkPeersHealth()
+
 	ticker := time.NewTicker(ReadinessCheckPeriod)
-	go r.checkPeersHeath()
 	// first tick is executed immediately
 	for ; true; <-ticker.C {
 		pairs, _, err := r.consulKV.List("ready/", nil)
@@ -151,6 +153,7 @@ func (r *registry) WatchPeersReady(callback func()) {
 					logger.Warn("Peer disconnected!", "peerID", peerID)
 					r.readyMap[peerID] = false
 					atomic.AddInt64(&r.readyCount, -1)
+					callback(false)
 				}
 
 			}
@@ -161,7 +164,7 @@ func (r *registry) WatchPeersReady(callback func()) {
 
 }
 
-func (r *registry) checkPeersHeath() {
+func (r *registry) checkPeersHealth() {
 	for {
 		time.Sleep(5 * time.Second)
 		if !r.ArePeersReady() {

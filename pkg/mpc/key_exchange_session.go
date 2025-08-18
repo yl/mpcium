@@ -28,9 +28,10 @@ const (
 )
 
 type ECDHSession interface {
-	StartKeyExchange() error
+	ListenKeyExchange() error
 	BroadcastPublicKey() error
 	WaitForExchangeComplete() error
+	ResetLocalKeys()
 	ErrChan() <-chan error
 	Close() error
 }
@@ -65,7 +66,14 @@ func NewECDHSession(
 	}
 }
 
-func (e *ecdhSession) StartKeyExchange() error {
+func (e *ecdhSession) ResetLocalKeys() {
+	// Set a specific key to an empty []byte
+	for _, peerID := range e.peerIDs {
+		e.identityStore.SetSymmetricKey(peerID, []byte{})
+	}
+}
+
+func (e *ecdhSession) ListenKeyExchange() error {
 	// Generate an ephemeral ECDH key pair
 	privateKey, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
@@ -85,7 +93,7 @@ func (e *ecdhSession) StartKeyExchange() error {
 		if ecdhMsg.From == e.nodeID {
 			return
 		}
-		logger.Info("Received ECDH message from", "node", ecdhMsg.From)
+
 		//TODO: consider how to avoid replay attack
 		if err := e.identityStore.VerifySignature(&ecdhMsg); err != nil {
 			e.errCh <- err
@@ -115,10 +123,11 @@ func (e *ecdhSession) StartKeyExchange() error {
 			logger.Info("ALL PEERS ARE READY! Starting to accept MPC requests")
 
 			e.mu.Lock()
-			e.exchangeDone = true
+			if !e.exchangeDone {
+				e.exchangeDone = true
+				e.exchangeComplete <- struct{}{}
+			}
 			e.mu.Unlock()
-
-			e.exchangeComplete <- struct{}{}
 		}
 	})
 

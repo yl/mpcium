@@ -239,7 +239,17 @@ func (s *fileStore) GetSymmetricKey(peerID string) ([]byte, error) {
 }
 
 func (s *fileStore) CheckSymmetricKeyComplete(desired int) bool {
-	return len(s.symmetricKeys) == desired
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	completeCount := 0
+	for _, value := range s.symmetricKeys {
+		if len(value) > 0 {
+			completeCount++
+		}
+	}
+
+	return completeCount == desired
 }
 
 // GetPublicKey retrieves a node's public key by its ID
