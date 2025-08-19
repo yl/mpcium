@@ -60,6 +60,9 @@ func (sc *keygenConsumer) waitForAllPeersReadyToGenKey(ctx context.Context) erro
 	for {
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return nil
+			}
 			return ctx.Err()
 		case <-ticker.C:
 			allPeersReady := sc.peerRegistry.ArePeersReady()

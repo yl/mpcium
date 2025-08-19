@@ -70,6 +70,9 @@ func (sc *signingConsumer) waitForSufficientPeers(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return nil
+			}
 			return ctx.Err()
 		case <-ticker.C:
 			readyPeers := sc.peerRegistry.GetReadyPeersCount()
