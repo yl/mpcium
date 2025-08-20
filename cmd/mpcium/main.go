@@ -194,7 +194,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	timeoutConsumer.Run()
 	defer timeoutConsumer.Close()
 	keygenConsumer := eventconsumer.NewKeygenConsumer(natsConn, keygenBroker, pubsub, peerRegistry)
-	signingConsumer := eventconsumer.NewSigningConsumer(natsConn, signingBroker, pubsub, peerRegistry)
+	signingConsumer := eventconsumer.NewSigningConsumer(natsConn, signingBroker, pubsub, peerRegistry, singingResultQueue)
 
 	// Make the node ready before starting the signing consumer
 	if err := peerRegistry.Ready(); err != nil {

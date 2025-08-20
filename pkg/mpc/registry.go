@@ -14,6 +14,7 @@ import (
 	"github.com/fystack/mpcium/pkg/messaging"
 	"github.com/hashicorp/consul/api"
 	"github.com/samber/lo"
+	"github.com/spf13/viper"
 )
 
 const (
@@ -23,6 +24,7 @@ const (
 type PeerRegistry interface {
 	Ready() error
 	ArePeersReady() bool
+	AreMajorityReady() bool
 	WatchPeersReady()
 	// Resign is called by the node when it is going to shutdown
 	Resign() error
@@ -49,6 +51,7 @@ type registry struct {
 	pubSub        messaging.PubSub
 	identityStore identity.Store
 	ecdhSession   ECDHSession
+	mpcThreshold  int
 
 	onPeerConnected    func(peerID string)
 	onPeerDisconnected func(peerID string)
@@ -64,6 +67,10 @@ func NewRegistry(
 	identityStore identity.Store,
 ) *registry {
 	ecdhSession := NewECDHSession(nodeID, peerNodeIDs, pubSub, identityStore)
+	mpcThreshold := viper.GetInt("mpc_threshold")
+	if mpcThreshold <= 2 {
+		logger.Fatal("mpc_threshold must be greater than 2", nil)
+	}
 
 	return &registry{
 		consulKV:      consulKV,
@@ -75,6 +82,7 @@ func NewRegistry(
 		pubSub:        pubSub,
 		identityStore: identityStore,
 		ecdhSession:   ecdhSession,
+		mpcThreshold:  mpcThreshold,
 	}
 }
 
@@ -286,6 +294,15 @@ func (r *registry) ArePeersReady() bool {
 	return r.ready && r.isECDHReady()
 }
 
+// AreMajorityReady checks if a majority of peers are ready.
+// Returns true only if:
+//  1. The number of ready peers (including self) is greater than mpcThreshold+1
+//  2. Symmetric keys are fully established among all ready peers (excluding self).
+func (r *registry) AreMajorityReady() bool {
+	readyCount := r.GetReadyPeersCount()
+	return int(readyCount) >= r.mpcThreshold+1 && r.isECDHReady()
+}
+
 func (r *registry) GetTotalPeersCount() int64 {
 	var self int64 = 1
 	return int64(len(r.peerNodeIDs)) + self
@@ -332,8 +349,8 @@ func (r *registry) GetReadyPeersCountExcludeSelf() int64 {
 }
 
 func (r *registry) isECDHReady() bool {
-	requiredKeyCount := int(r.GetReadyPeersCount()) - 1
-	return r.identityStore.CheckSymmetricKeyComplete(requiredKeyCount)
+	requiredKeyCount := r.GetReadyPeersCountExcludeSelf()
+	return r.identityStore.CheckSymmetricKeyComplete(int(requiredKeyCount))
 }
 
 func (r *registry) composeHealthCheckTopic(nodeID string) string {
