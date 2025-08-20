@@ -93,6 +93,9 @@ func (sc *signingConsumer) waitForSufficientPeers(ctx context.Context) error {
 func (sc *signingConsumer) Run(ctx context.Context) error {
 	// Wait for sufficient peers before starting to consume messages
 	if err := sc.waitForSufficientPeers(ctx); err != nil {
+		if err == context.Canceled {
+			return nil
+		}
 		return fmt.Errorf("failed to wait for sufficient peers: %w", err)
 	}
 

@@ -83,6 +83,9 @@ func (sc *keygenConsumer) waitForAllPeersReadyToGenKey(ctx context.Context) erro
 func (sc *keygenConsumer) Run(ctx context.Context) error {
 	// Wait for sufficient peers before starting to consume messages
 	if err := sc.waitForAllPeersReadyToGenKey(ctx); err != nil {
+		if err == context.Canceled {
+			return nil
+		}
 		return fmt.Errorf("failed to wait for sufficient peers: %w", err)
 	}
 

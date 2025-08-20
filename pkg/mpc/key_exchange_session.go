@@ -17,8 +17,6 @@ import (
 
 	"encoding/json"
 
-	"sync"
-
 	"github.com/nats-io/nats.go"
 )
 
@@ -30,24 +28,21 @@ const (
 type ECDHSession interface {
 	ListenKeyExchange() error
 	BroadcastPublicKey() error
-	WaitForExchangeComplete() error
-	ResetLocalKeys()
+	RemovePeer(peerID string)
+	GetReadyPeersCount() int
 	ErrChan() <-chan error
 	Close() error
 }
 
 type ecdhSession struct {
-	nodeID           string
-	peerIDs          []string
-	pubSub           messaging.PubSub
-	ecdhSub          messaging.Subscription
-	identityStore    identity.Store
-	privateKey       *ecdh.PrivateKey
-	publicKey        *ecdh.PublicKey
-	exchangeComplete chan struct{}
-	errCh            chan error
-	exchangeDone     bool
-	mu               sync.RWMutex
+	nodeID        string
+	peerIDs       []string
+	pubSub        messaging.PubSub
+	ecdhSub       messaging.Subscription
+	identityStore identity.Store
+	privateKey    *ecdh.PrivateKey
+	publicKey     *ecdh.PublicKey
+	errCh         chan error
 }
 
 func NewECDHSession(
@@ -57,20 +52,24 @@ func NewECDHSession(
 	identityStore identity.Store,
 ) *ecdhSession {
 	return &ecdhSession{
-		nodeID:           nodeID,
-		peerIDs:          peerIDs,
-		pubSub:           pubSub,
-		identityStore:    identityStore,
-		exchangeComplete: make(chan struct{}, 1),
-		errCh:            make(chan error, 1),
+		nodeID:        nodeID,
+		peerIDs:       peerIDs,
+		pubSub:        pubSub,
+		identityStore: identityStore,
+		errCh:         make(chan error, 1),
 	}
 }
 
-func (e *ecdhSession) ResetLocalKeys() {
-	// Set a specific key to an empty []byte
-	for _, peerID := range e.peerIDs {
-		e.identityStore.SetSymmetricKey(peerID, []byte{})
-	}
+func (e *ecdhSession) RemovePeer(peerID string) {
+	e.identityStore.RemoveSymmetricKey(peerID)
+}
+
+func (e *ecdhSession) GetReadyPeersCount() int {
+	return e.identityStore.GetSymetricKeyCount()
+}
+
+func (e *ecdhSession) ErrChan() <-chan error {
+	return e.errCh
 }
 
 func (e *ecdhSession) ListenKeyExchange() error {
@@ -114,21 +113,7 @@ func (e *ecdhSession) ListenKeyExchange() error {
 		// Derive symmetric key using HKDF
 		symmetricKey := e.deriveSymmetricKey(sharedSecret, ecdhMsg.From)
 		e.identityStore.SetSymmetricKey(ecdhMsg.From, symmetricKey)
-
-		requiredKeyCount := len(e.peerIDs) - 1
-		logger.Info("ECDH progress", "peer", ecdhMsg.From, "required", requiredKeyCount)
-
-		if e.identityStore.CheckSymmetricKeyComplete(requiredKeyCount) {
-			logger.Info("Completed ECDH!", "symmetric key counts of peers", requiredKeyCount)
-			logger.Info("ALL PEERS ARE READY! Starting to accept MPC requests")
-
-			e.mu.Lock()
-			if !e.exchangeDone {
-				e.exchangeDone = true
-				e.exchangeComplete <- struct{}{}
-			}
-			e.mu.Unlock()
-		}
+		logger.Debug("ECDH progress", "peer", ecdhMsg.From, "current", e.identityStore.GetSymetricKeyCount())
 	})
 
 	e.ecdhSub = sub
@@ -136,10 +121,6 @@ func (e *ecdhSession) ListenKeyExchange() error {
 		return fmt.Errorf("failed to subscribe to ECDH topic: %w", err)
 	}
 	return nil
-}
-
-func (s *ecdhSession) ErrChan() <-chan error {
-	return s.errCh
 }
 
 func (s *ecdhSession) Close() error {
@@ -171,25 +152,6 @@ func (e *ecdhSession) BroadcastPublicKey() error {
 		return fmt.Errorf("%s failed to publish DH message because %w", e.nodeID, err)
 	}
 	return nil
-}
-
-func (e *ecdhSession) WaitForExchangeComplete() error {
-	e.mu.RLock()
-	if e.exchangeDone {
-		e.mu.RUnlock()
-		return nil
-	}
-	e.mu.RUnlock()
-	timeout := time.After(ECDHExchangeTimeout) // 2 minutes timeout
-
-	select {
-	case <-e.exchangeComplete:
-		return nil
-	case err := <-e.errCh:
-		return err
-	case <-timeout:
-		return fmt.Errorf("ECDH exchange timeout!")
-	}
 }
 
 func deriveConsistentInfo(a, b string) []byte {
