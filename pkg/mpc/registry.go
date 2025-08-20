@@ -68,8 +68,8 @@ func NewRegistry(
 ) *registry {
 	ecdhSession := NewECDHSession(nodeID, peerNodeIDs, pubSub, identityStore)
 	mpcThreshold := viper.GetInt("mpc_threshold")
-	if mpcThreshold <= 2 {
-		logger.Fatal("mpc_threshold must be greater than 2", nil)
+	if mpcThreshold < 1 {
+		logger.Fatal("mpc_threshold must be greater than 0", nil)
 	}
 
 	return &registry{

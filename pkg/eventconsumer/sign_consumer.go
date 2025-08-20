@@ -230,7 +230,7 @@ func (sc *signingConsumer) handleSigningError(signMsg types.SignTxMessage, error
 	}
 
 	err = sc.signingResultQueue.Enqueue(event.SigningResultCompleteTopic, signingResultBytes, &messaging.EnqueueOptions{
-		IdempotententKey: buildSigningIdempotentKey(signMsg.TxID, sessionID, mpc.TypeSigningResultFmt),
+		IdempotententKey: buildIdempotentKey(signMsg.TxID, sessionID, mpc.TypeSigningResultFmt),
 	})
 	if err != nil {
 		logger.Error("Failed to enqueue signing result event", err,
@@ -252,7 +252,7 @@ func (sc *signingConsumer) Close() error {
 	return nil
 }
 
-func buildSigningIdempotentKey(baseID string, sessionID string, formatTemplate string) string {
+func buildIdempotentKey(baseID string, sessionID string, formatTemplate string) string {
 	var uniqueKey string
 	if sessionID != "" {
 		uniqueKey = fmt.Sprintf("%s:%s", baseID, sessionID)
