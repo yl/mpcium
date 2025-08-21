@@ -1,10 +1,7 @@
-// The Licensed Work is (c) 2022 Sygma
-// SPDX-License-Identifier: LGPL-3.0-only
 package types
 
 import (
 	"encoding/json"
-	"sort"
 
 	"github.com/bnb-chain/tss-lib/v2/tss"
 )
@@ -125,14 +122,4 @@ func (msg *TssMessage) MarshalForSigning() ([]byte, error) {
 
 	// Use json.Marshal with sorted keys
 	return json.Marshal(signingData)
-}
-
-// Helper function to get sorted party IDs
-func getPartyIDs(parties []*tss.PartyID) []string {
-	ids := make([]string, len(parties))
-	for i, party := range parties {
-		ids[i] = party.Id
-	}
-	sort.Strings(ids) // Ensure deterministic order
-	return ids
 }

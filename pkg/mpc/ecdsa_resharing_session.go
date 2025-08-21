@@ -21,11 +21,13 @@ type ReshareSession interface {
 	Init() error
 	Reshare(done func())
 	GetPubKeyResult() []byte
+	GetLegacyCommitteePeers() []string
 }
 
 type ecdsaReshareSession struct {
 	*session
 	isNewParty    bool
+	oldPeerIDs    []string
 	newPeerIDs    []string
 	reshareParams *tss.ReSharingParameters
 	endCh         chan *keygen.LocalPartySaveData
@@ -50,6 +52,12 @@ func NewECDSAReshareSession(
 	isNewParty bool,
 	version int,
 ) *ecdsaReshareSession {
+
+	realPartyIDs := oldPartyIDs
+	if isNewParty {
+		realPartyIDs = newPartyIDs
+	}
+
 	session := session{
 		walletID:           walletID,
 		pubSub:             pubSub,
@@ -57,7 +65,7 @@ func NewECDSAReshareSession(
 		threshold:          threshold,
 		participantPeerIDs: participantPeerIDs,
 		selfPartyID:        selfID,
-		partyIDs:           newPartyIDs,
+		partyIDs:           realPartyIDs,
 		outCh:              make(chan tss.Message),
 		ErrCh:              make(chan error),
 		preParams:          preParams,
@@ -68,8 +76,8 @@ func NewECDSAReshareSession(
 			ComposeBroadcastTopic: func() string {
 				return fmt.Sprintf("resharing:broadcast:ecdsa:%s", walletID)
 			},
-			ComposeDirectTopic: func(nodeID string) string {
-				return fmt.Sprintf("resharing:direct:ecdsa:%s:%s", nodeID, walletID)
+			ComposeDirectTopic: func(fromID string, toID string) string {
+				return fmt.Sprintf("resharing:direct:ecdsa:%s:%s:%s", fromID, toID, walletID)
 			},
 		},
 		composeKey: func(walletID string) string {
@@ -90,17 +98,46 @@ func NewECDSAReshareSession(
 		len(newPartyIDs),
 		newThreshold,
 	)
+
+	var oldPeerIDs []string
+	for _, partyId := range oldPartyIDs {
+		oldPeerIDs = append(oldPeerIDs, partyIDToNodeID(partyId))
+	}
+
 	return &ecdsaReshareSession{
 		session:       &session,
 		reshareParams: reshareParams,
 		isNewParty:    isNewParty,
+		oldPeerIDs:    oldPeerIDs,
 		newPeerIDs:    newPeerIDs,
 		endCh:         make(chan *keygen.LocalPartySaveData),
 	}
 }
 
+// GetLegacyCommitteePeers returns peer IDs that were part of the old committee
+// but are NOT part of the new committee after resharing.
+// These peers are still relevant during resharing because
+// they must send final share data to the new committee.
+func (s *ecdsaReshareSession) GetLegacyCommitteePeers() []string {
+	difference := func(A, B []string) []string {
+		seen := make(map[string]bool)
+		for _, b := range B {
+			seen[b] = true
+		}
+		var result []string
+		for _, a := range A {
+			if !seen[a] {
+				result = append(result, a)
+			}
+		}
+		return result
+	}
+
+	return difference(s.oldPeerIDs, s.newPeerIDs)
+}
+
 func (s *ecdsaReshareSession) Init() error {
-	logger.Infof("Initializing resharing session with partyID: %s, newPartyIDs %s", s.selfPartyID, s.partyIDs)
+	logger.Infof("Initializing ecdsa resharing session with partyID: %s, newPartyIDs %s", s.selfPartyID, s.partyIDs)
 	var share keygen.LocalPartySaveData
 
 	if s.isNewParty {

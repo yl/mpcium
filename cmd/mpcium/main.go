@@ -129,7 +129,6 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	if err != nil {
 		logger.Fatal("Failed to connect to NATS", err)
 	}
-	defer natsConn.Close()
 
 	pubsub := messaging.NewNATSPubSub(natsConn)
 	keygenBroker, err := messaging.NewJetStreamBroker(ctx, natsConn, event.KeygenBrokerStream, []string{
@@ -159,10 +158,10 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	reshareResultQueue := mqManager.NewMessageQueue("mpc_reshare_result")
 	defer reshareResultQueue.Close()
 
-	logger.Info("Node is running", "peerID", nodeID, "name", nodeName)
+	logger.Info("Node is running", "ID", nodeID, "name", nodeName)
 
 	peerNodeIDs := GetPeerIDs(peers)
-	peerRegistry := mpc.NewRegistry(nodeID, peerNodeIDs, consulClient.KV())
+	peerRegistry := mpc.NewRegistry(nodeID, peerNodeIDs, consulClient.KV(), directMessaging, pubsub, identityStore)
 
 	mpcNode := mpc.NewNode(
 		nodeID,
@@ -194,22 +193,29 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 	timeoutConsumer.Run()
 	defer timeoutConsumer.Close()
-	keygenConsumer := eventconsumer.NewKeygenConsumer(natsConn, keygenBroker, pubsub, peerRegistry)
-	signingConsumer := eventconsumer.NewSigningConsumer(natsConn, signingBroker, pubsub, peerRegistry)
+	keygenConsumer := eventconsumer.NewKeygenConsumer(natsConn, keygenBroker, pubsub, peerRegistry, genKeyResultQueue)
+	signingConsumer := eventconsumer.NewSigningConsumer(natsConn, signingBroker, pubsub, peerRegistry, singingResultQueue)
 
 	// Make the node ready before starting the signing consumer
 	if err := peerRegistry.Ready(); err != nil {
 		logger.Error("Failed to mark peer registry as ready", err)
 	}
 	logger.Info("[READY] Node is ready", "nodeID", nodeID)
+
+	logger.Info("Starting consumers", "nodeID", nodeID)
 	appContext, cancel := context.WithCancel(context.Background())
-	// Setup signal handling to cancel context on termination signals.
+	//Setup signal handling to cancel context on termination signals.
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 		logger.Warn("Shutdown signal received, canceling context...")
 		cancel()
+
+		// Resign from peer registry first (before closing NATS)
+		if err := peerRegistry.Resign(); err != nil {
+			logger.Error("Failed to resign from peer registry", err)
+		}
 
 		// Gracefully close consumers
 		if err := keygenConsumer.Close(); err != nil {
@@ -218,10 +224,15 @@ func runNode(ctx context.Context, c *cli.Command) error {
 		if err := signingConsumer.Close(); err != nil {
 			logger.Error("Failed to close signing consumer", err)
 		}
+
+		err := natsConn.Drain()
+		if err != nil {
+			logger.Error("Failed to drain NATS connection", err)
+		}
 	}()
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, 2)
+	errChan := make(chan error, 3)
 
 	wg.Add(1)
 	go func() {
@@ -250,7 +261,6 @@ func runNode(ctx context.Context, c *cli.Command) error {
 		logger.Info("All consumers have finished")
 		close(errChan)
 	}()
-
 	for err := range errChan {
 		if err != nil {
 			logger.Error("Consumer error received", err)
@@ -258,6 +268,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 			return err
 		}
 	}
+
 	return nil
 }
 

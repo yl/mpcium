@@ -2,7 +2,6 @@
 
 # E2E Test Identity Setup Script
 # This script sets up identities for testing with separate test database paths
-
 set -e
 
 # Number of test nodes
