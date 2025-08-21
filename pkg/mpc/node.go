@@ -83,11 +83,7 @@ func (p *Node) CreateKeyGenSession(
 	resultQueue messaging.MessageQueue,
 ) (KeyGenSession, error) {
 	if !p.peerRegistry.ArePeersReady() {
-		return nil, fmt.Errorf(
-			"Not enough peers to create gen session! Expected %d, got %d",
-			p.peerRegistry.GetTotalPeersCount(),
-			p.peerRegistry.GetReadyPeersCount(),
-		)
+		return nil, errors.New("All nodes are not ready!")
 	}
 
 	keyInfo, _ := p.getKeyInfo(sessionType, walletID)
@@ -412,7 +408,6 @@ func (p *Node) Close() {
 		logger.Error("Resign failed", err)
 	}
 }
-
 
 func (p *Node) generatePreParams() []*keygen.LocalPreParams {
 	start := time.Now()

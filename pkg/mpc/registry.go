@@ -126,8 +126,6 @@ func (r *registry) registerReadyPairs(peerIDs []string) {
 		r.mu.Lock()
 		r.ready = true
 		r.mu.Unlock()
-		// Start ECDH exchange when all peers are connected
-		go r.triggerECDHExchange()
 		logger.Info("All peers are ready including ECDH exchange completion")
 	}
 }
