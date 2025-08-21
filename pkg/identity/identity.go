@@ -44,6 +44,8 @@ type Store interface {
 
 	SetSymmetricKey(peerID string, key []byte)
 	GetSymmetricKey(peerID string) ([]byte, error)
+	RemoveSymmetricKey(peerID string)
+	GetSymetricKeyCount() int
 	CheckSymmetricKeyComplete(desired int) bool
 
 	EncryptMessage(plaintext []byte, peerID string) ([]byte, error)
@@ -238,7 +240,21 @@ func (s *fileStore) GetSymmetricKey(peerID string) ([]byte, error) {
 	return nil, fmt.Errorf("SymmetricKey key not found for node ID: %s", peerID)
 }
 
+func (s *fileStore) RemoveSymmetricKey(peerID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.symmetricKeys, peerID)
+}
+
+func (s *fileStore) GetSymetricKeyCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.symmetricKeys)
+}
+
 func (s *fileStore) CheckSymmetricKeyComplete(desired int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.symmetricKeys) == desired
 }
 
