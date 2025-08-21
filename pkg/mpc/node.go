@@ -39,7 +39,6 @@ type Node struct {
 	identityStore  identity.Store
 
 	peerRegistry PeerRegistry
-	ecdhSession  ECDHSession
 }
 
 func NewNode(
@@ -55,11 +54,6 @@ func NewNode(
 	start := time.Now()
 	elapsed := time.Since(start)
 	logger.Info("Starting new node, preparams is generated successfully!", "elapsed", elapsed.Milliseconds())
-	// Each node initiates the DH key exchange listener at the beginning and invoke message sending when all peers are ready
-	dhSession := NewECDHSession(nodeID, peerIDs, pubSub, identityStore)
-	if err := dhSession.ListenKeyExchange(); err != nil {
-		logger.Fatal("Failed to listen to DH key exchange", err)
-	}
 
 	node := &Node{
 		nodeID:        nodeID,
@@ -70,22 +64,11 @@ func NewNode(
 		keyinfoStore:  keyinfoStore,
 		peerRegistry:  peerRegistry,
 		identityStore: identityStore,
-		ecdhSession:   dhSession,
 	}
 	node.ecdsaPreParams = node.generatePreParams()
 
-	// we define two types of tasks, initTask and resetTask
-	ecdhTasks := func(isInit bool) {
-		if isInit {
-			if err := dhSession.BroadcastPublicKey(); err != nil {
-				logger.Fatal("DH key broadcast failed", err)
-			}
-		} else {
-			dhSession.ResetLocalKeys()
-		}
-	}
-
-	go peerRegistry.WatchPeersReady(ecdhTasks)
+	// Start watching peers - ECDH is now handled by the registry
+	go peerRegistry.WatchPeersReady()
 	return node
 }
 
@@ -100,11 +83,7 @@ func (p *Node) CreateKeyGenSession(
 	resultQueue messaging.MessageQueue,
 ) (KeyGenSession, error) {
 	if !p.peerRegistry.ArePeersReady() {
-		return nil, fmt.Errorf(
-			"Not enough peers to create gen session! Expected %d, got %d",
-			p.peerRegistry.GetTotalPeersCount(),
-			p.peerRegistry.GetReadyPeersCount(),
-		)
+		return nil, errors.New("All nodes are not ready!")
 	}
 
 	keyInfo, _ := p.getKeyInfo(sessionType, walletID)
@@ -428,10 +407,6 @@ func (p *Node) Close() {
 	if err != nil {
 		logger.Error("Resign failed", err)
 	}
-}
-
-func (p *Node) GetECDHSession() ECDHSession {
-	return p.ecdhSession
 }
 
 func (p *Node) generatePreParams() []*keygen.LocalPreParams {
