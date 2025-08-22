@@ -122,6 +122,17 @@ func main() {
 						Value:   false,
 						Usage:   "Overwrite identity files if they already exist",
 					},
+					&cli.StringFlag{
+						Name:    "algorithm",
+						Aliases: []string{"a"},
+						Value:   "ed25519",
+						Usage:   "Algorithm to use for key generation (ed25519,p256)",
+					},
+					&cli.StringFlag{
+						Name:    "pubkey",
+						Aliases: []string{"p"},
+						Usage:   "Path to PEM file containing P-256 public key (required when algorithm=p256)",
+					},
 				},
 				Action: generateInitiatorIdentity,
 			},

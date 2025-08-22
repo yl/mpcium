@@ -1,9 +1,15 @@
 package identity
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -61,9 +67,10 @@ type fileStore struct {
 	publicKeys map[string][]byte
 	mu         sync.RWMutex
 
-	privateKey      []byte
-	initiatorPubKey []byte
-	symmetricKeys   map[string][]byte
+	privateKey             []byte
+	initiatorPubKeyEd25519 []byte
+	initiatorPubKeyP256    *ecdsa.PublicKey
+	symmetricKeys          map[string][]byte
 }
 
 // NewFileStore creates a new identity store
@@ -82,16 +89,10 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 		return nil, fmt.Errorf("invalid private key format: %w", err)
 	}
 
-	pubKeyHex := viper.GetString("event_initiator_pubkey")
-	if pubKeyHex == "" {
-		return nil, fmt.Errorf("event_initiator_pubkey not found in quax config")
-	}
-	initiatorPubKey, err := hex.DecodeString(pubKeyHex)
+	initiatorPubKeyEd25519, initiatorPubKeyP256, err := loadInitiatorKeys()
 	if err != nil {
-		return nil, fmt.Errorf("invalid initiator public key format: %w", err)
+		return nil, err
 	}
-
-	logger.Infof("Loaded initiator public key for node %s", pubKeyHex)
 
 	// Load peers.json to validate all nodes have identity files
 	peersData, err := os.ReadFile("peers.json")
@@ -105,12 +106,13 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 	}
 
 	store := &fileStore{
-		identityDir:     identityDir,
-		currentNodeName: nodeName,
-		publicKeys:      make(map[string][]byte),
-		privateKey:      privateKey,
-		initiatorPubKey: initiatorPubKey,
-		symmetricKeys:   make(map[string][]byte),
+		identityDir:            identityDir,
+		currentNodeName:        nodeName,
+		publicKeys:             make(map[string][]byte),
+		privateKey:             privateKey,
+		initiatorPubKeyEd25519: initiatorPubKeyEd25519,
+		initiatorPubKeyP256:    initiatorPubKeyP256,
+		symmetricKeys:          make(map[string][]byte),
 	}
 
 	// Check that each node in peers.json has an identity file
@@ -123,7 +125,12 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 
 		data, err := os.ReadFile(identityFilePath)
 		if err != nil {
-			return nil, fmt.Errorf("missing identity file for node %s (%s): %w", nodeName, nodeID, err)
+			return nil, fmt.Errorf(
+				"missing identity file for node %s (%s): %w",
+				nodeName,
+				nodeID,
+				err,
+			)
 		}
 
 		var identity NodeIdentity
@@ -133,8 +140,12 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 
 		// Verify that the nodeID in peers.json matches the one in the identity file
 		if identity.NodeID != nodeID {
-			return nil, fmt.Errorf("node ID mismatch for %s: %s in peers.json vs %s in identity file",
-				nodeName, nodeID, identity.NodeID)
+			return nil, fmt.Errorf(
+				"node ID mismatch for %s: %s in peers.json vs %s in identity file",
+				nodeName,
+				nodeID,
+				identity.NodeID,
+			)
 		}
 
 		key, err := hex.DecodeString(identity.PublicKey)
@@ -146,6 +157,130 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 	}
 
 	return store, nil
+}
+
+func loadInitiatorKeys() ([]byte, *ecdsa.PublicKey, error) {
+	// Get algorithm configuration with default
+	algorithm := viper.GetString("event_initiator_algorithm")
+	if algorithm == "" {
+		algorithm = "ed25519"
+	}
+
+	// Validate algorithm
+	if algorithm != "ed25519" && algorithm != "p256" {
+		return nil, nil, fmt.Errorf(
+			"invalid event_initiator_algorithm: %s. Must be 'ed25519' or 'p256'",
+			algorithm,
+		)
+	}
+
+	var initiatorPubKeyEd25519 []byte
+	var initiatorPubKeyP256 *ecdsa.PublicKey
+
+	switch algorithm {
+	case "ed25519":
+		key, err := loadEd25519InitiatorKey()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load Ed25519 initiator key: %w", err)
+		}
+		initiatorPubKeyEd25519 = key
+		logger.Infof("Loaded Ed25519 initiator public key")
+
+	case "p256":
+		key, err := loadP256InitiatorKey()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to load P-256 initiator key: %w", err)
+		}
+		initiatorPubKeyP256 = key
+		logger.Infof(
+			"Loaded P-256 initiator public key from %s",
+			viper.GetString("event_initiator_pubkey"),
+		)
+	}
+
+	return initiatorPubKeyEd25519, initiatorPubKeyP256, nil
+}
+
+// loadEd25519InitiatorKey loads Ed25519 initiator public key
+func loadEd25519InitiatorKey() ([]byte, error) {
+	pubKeyHex := viper.GetString("event_initiator_pubkey")
+	if pubKeyHex == "" {
+		return nil, fmt.Errorf("event_initiator_pubkey not found in config")
+	}
+
+	key, err := hex.DecodeString(pubKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid initiator public key format: %w", err)
+	}
+
+	return key, nil
+}
+
+func loadP256InitiatorKey() (*ecdsa.PublicKey, error) {
+	pubKeyHex := viper.GetString("event_initiator_pubkey")
+	if pubKeyHex == "" {
+		return nil, fmt.Errorf("event_initiator_pubkey not found in config")
+	}
+
+	// Try to decode as hex first
+	pubKeyBytes, err := hex.DecodeString(pubKeyHex)
+	if err != nil {
+		// If hex decoding fails, try base64
+		pubKeyBytes, err = base64.StdEncoding.DecodeString(pubKeyHex)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to decode event_initiator_pubkey as hex or base64: %w",
+				err,
+			)
+		}
+	}
+
+	// Convert DER bytes to PEM format
+	pemBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubKeyBytes,
+	}
+	pemBytes := pem.EncodeToMemory(pemBlock)
+
+	// Now parse with your existing function
+	return parseAndValidateP256Key(pemBytes)
+}
+
+// parseAndValidateP256Key parses and validates a P-256 public key from bytes
+func parseAndValidateP256Key(keyBytes []byte) (*ecdsa.PublicKey, error) {
+	// Decode PEM block
+	block, _ := pem.Decode(keyBytes)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	// Parse public key
+	var pubKey interface{}
+	var err error
+	if block.Type == "PUBLIC KEY" || block.Type == "EC PUBLIC KEY" {
+		pubKey, err = x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse public key: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported PEM type: %s", block.Type)
+	}
+
+	// Verify it's an ECDSA P-256 key
+	ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public key is not an ECDSA key")
+	}
+
+	// Check if it's P-256 curve
+	if ecdsaPubKey.Curve.Params().Name != "P-256" {
+		return nil, fmt.Errorf(
+			"public key is not P-256 curve (got: %s)",
+			ecdsaPubKey.Curve.Params().Name,
+		)
+	}
+
+	return ecdsaPubKey, nil
 }
 
 // loadPrivateKey loads the private key from file, decrypting if necessary
@@ -374,22 +509,75 @@ func (s *fileStore) VerifySignature(msg *types.ECDHMessage) error {
 	return nil
 }
 
-// VerifyInitiatorMessage verifies that a message was signed by the known initiator
+// // VerifyInitiatorMessage verifies that a message was signed by the known initiator
+// func (s *fileStore) VerifyInitiatorMessage(msg types.InitiatorMessage) error {
+// 	// Get the raw message that was signed
+// 	msgBytes, err := msg.Raw()
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get raw message data: %w", err)
+// 	}
+
+// 	// Get the signature
+// 	signature := msg.Sig()
+// 	if len(signature) == 0 {
+// 		return errors.New("signature is empty")
+// 	}
+
+// 	// Verify the signature using the initiator's public key
+// 	if !ed25519.Verify(s.initiatorPubKey, msgBytes, signature) {
+// 		return fmt.Errorf("invalid signature from initiator")
+// 	}
+
+// 	return nil
+// }
+
 func (s *fileStore) VerifyInitiatorMessage(msg types.InitiatorMessage) error {
-	// Get the raw message that was signed
+	algo := msg.Algo()
+	switch algo {
+	case string(types.KeyTypeEd25519):
+		return s.verifyEd25519(msg)
+	case string(types.KeyTypeP256):
+		return s.verifyP256(msg)
+	}
+	return fmt.Errorf("unsupported algorithm: %s", algo)
+}
+
+func (s *fileStore) verifyEd25519(msg types.InitiatorMessage) error {
 	msgBytes, err := msg.Raw()
 	if err != nil {
 		return fmt.Errorf("failed to get raw message data: %w", err)
 	}
-
-	// Get the signature
 	signature := msg.Sig()
 	if len(signature) == 0 {
 		return errors.New("signature is empty")
 	}
 
-	// Verify the signature using the initiator's public key
-	if !ed25519.Verify(s.initiatorPubKey, msgBytes, signature) {
+	if !ed25519.Verify(s.initiatorPubKeyEd25519, msgBytes, signature) {
+		return fmt.Errorf("invalid signature from initiator")
+	}
+	return nil
+}
+
+func (s *fileStore) verifyP256(msg types.InitiatorMessage) error {
+	msgBytes, err := msg.Raw()
+	if err != nil {
+		return fmt.Errorf("failed to get raw message data: %w", err)
+	}
+	signature := msg.Sig()
+	if len(signature) == 0 {
+		return errors.New("signature is empty")
+	}
+
+	if s.initiatorPubKeyP256 == nil {
+		return fmt.Errorf("initiator public key for secp256r1 is not set")
+	}
+	if s.initiatorPubKeyP256.Curve != elliptic.P256() {
+		return fmt.Errorf("public key is not on P-256 curve")
+	}
+
+	hash := sha256.Sum256(msgBytes)
+
+	if !ecdsa.VerifyASN1(s.initiatorPubKeyP256, hash[:], signature) {
 		return fmt.Errorf("invalid signature from initiator")
 	}
 

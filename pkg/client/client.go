@@ -117,15 +117,25 @@ func NewMPCClient(opts Options) MPCClient {
 	priv := ed25519.NewKeyFromSeed(privSeed)
 
 	// 2) Create the PubSub for both publish & subscribe
-	signingBroker, err := messaging.NewJetStreamBroker(context.Background(), opts.NatsConn, "mpc-signing", []string{
-		"mpc.signing_request.*",
-	})
+	signingBroker, err := messaging.NewJetStreamBroker(
+		context.Background(),
+		opts.NatsConn,
+		"mpc-signing",
+		[]string{
+			"mpc.signing_request.*",
+		},
+	)
 	if err != nil {
 		logger.Fatal("Failed to create signing jetstream broker", err)
 	}
-	keygenBroker, err := messaging.NewJetStreamBroker(context.Background(), opts.NatsConn, "mpc-keygen", []string{
-		"mpc.keygen_request.*",
-	})
+	keygenBroker, err := messaging.NewJetStreamBroker(
+		context.Background(),
+		opts.NatsConn,
+		"mpc-keygen",
+		[]string{
+			"mpc.keygen_request.*",
+		},
+	)
 	if err != nil {
 		logger.Fatal("Failed to create keygen jetstream broker", err)
 	}

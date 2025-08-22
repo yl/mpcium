@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,6 +24,7 @@ import (
 // Identity struct to store node metadata
 type InitiatorIdentity struct {
 	NodeName    string `json:"node_name"`
+	Algorithm   string `json:"algorithm,omitempty"`
 	PublicKey   string `json:"public_key"`
 	CreatedAt   string `json:"created_at"`
 	CreatedBy   string `json:"created_by"`
@@ -28,11 +32,26 @@ type InitiatorIdentity struct {
 	MachineName string `json:"machine_name"`
 }
 
+// KeyData holds the generated key information
+type KeyData struct {
+	PublicKeyHex  string
+	PrivateKeyHex string
+}
+
 func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	nodeName := c.String("node-name")
 	outputDir := c.String("output-dir")
 	encrypt := c.Bool("encrypt")
 	overwrite := c.Bool("overwrite")
+	algorithm := c.String("algorithm")
+
+	if algorithm == "" {
+		algorithm = "ed25519"
+	}
+
+	if algorithm != "ed25519" && algorithm != "p256" {
+		return fmt.Errorf("invalid algorithm: %s. Must be 'ed25519' or 'p256'", algorithm)
+	}
 
 	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(outputDir, 0750); err != nil {
@@ -46,7 +65,10 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 
 	// Check for existing identity file
 	if _, err := os.Stat(identityPath); err == nil && !overwrite {
-		return fmt.Errorf("identity file already exists: %s (use --overwrite to force)", identityPath)
+		return fmt.Errorf(
+			"identity file already exists: %s (use --overwrite to force)",
+			identityPath,
+		)
 	}
 
 	// Check for existing key files
@@ -56,19 +78,26 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 
 	if encrypt {
 		if _, err := os.Stat(encKeyPath); err == nil && !overwrite {
-			return fmt.Errorf("encrypted key file already exists: %s (use --overwrite to force)", encKeyPath)
+			return fmt.Errorf(
+				"encrypted key file already exists: %s (use --overwrite to force)",
+				encKeyPath,
+			)
 		}
 	}
 
-	// Generate Ed25519 keypair
-	pubKey, privKeyFull, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return fmt.Errorf("failed to generate Ed25519 keypair: %w", err)
+	// Generate keys based on algorithm
+	var keyData KeyData
+	var err error
+
+	if algorithm == "ed25519" {
+		keyData, err = generateEd25519Keys()
+	} else {
+		keyData, err = generateP256Keys()
 	}
 
-	// Extract 32-byte seed
-	privKeySeed := privKeyFull.Seed()
-	privHex := hex.EncodeToString(privKeySeed)
+	if err != nil {
+		return fmt.Errorf("failed to generate %s keys: %w", algorithm, err)
+	}
 
 	// Get current user
 	currentUser, err := user.Current()
@@ -85,7 +114,8 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	// Create Identity object
 	identity := InitiatorIdentity{
 		NodeName:    nodeName,
-		PublicKey:   hex.EncodeToString(pubKey),
+		Algorithm:   algorithm,
+		PublicKey:   keyData.PublicKeyHex,
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 		CreatedBy:   currentUser.Username,
 		MachineOS:   runtime.GOOS,
@@ -136,7 +166,7 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 		}
 
 		// Write the encrypted private key
-		if _, err := identityWriter.Write([]byte(privHex)); err != nil {
+		if _, err := identityWriter.Write([]byte(keyData.PrivateKeyHex)); err != nil {
 			return fmt.Errorf("failed to write encrypted private key: %w", err)
 		}
 
@@ -152,7 +182,7 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 		fmt.Println("WARNING: You are generating the private key without encryption.")
 		fmt.Println("This is less secure. Consider using --encrypt flag for better security.")
 
-		if err := os.WriteFile(keyPath, []byte(privHex), 0600); err != nil {
+		if err := os.WriteFile(keyPath, []byte(keyData.PrivateKeyHex), 0600); err != nil {
 			return fmt.Errorf("failed to save private key: %w", err)
 		}
 	}
@@ -161,4 +191,43 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	fmt.Println("- Private Key:", keyPath)
 	fmt.Println("- Identity JSON:", identityPath)
 	return nil
+}
+
+// generateEd25519Keys generates Ed25519 keypair
+func generateEd25519Keys() (KeyData, error) {
+	pubKey, privKeyFull, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return KeyData{}, err
+	}
+
+	privKeySeed := privKeyFull.Seed()
+	return KeyData{
+		PublicKeyHex:  hex.EncodeToString(pubKey),
+		PrivateKeyHex: hex.EncodeToString(privKeySeed),
+	}, nil
+}
+
+// generateP256Keys generates P-256 keypair
+func generateP256Keys() (KeyData, error) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return KeyData{}, err
+	}
+
+	// Convert private key to PEM format
+	privateKeyBytes, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return KeyData{}, err
+	}
+
+	// Convert public key to DER format
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return KeyData{}, err
+	}
+
+	return KeyData{
+		PublicKeyHex:  hex.EncodeToString(publicKeyBytes),
+		PrivateKeyHex: hex.EncodeToString(privateKeyBytes),
+	}, nil
 }

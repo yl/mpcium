@@ -103,7 +103,13 @@ func main() {
 	go func() {
 		wg.Wait()
 		totalDuration := time.Since(startAll).Seconds()
-		logger.Info("All wallets generated", "count", completedCount, "total_duration_seconds", fmt.Sprintf("%.3f", totalDuration))
+		logger.Info(
+			"All wallets generated",
+			"count",
+			completedCount,
+			"total_duration_seconds",
+			fmt.Sprintf("%.3f", totalDuration),
+		)
 
 		// Save wallet IDs to wallets.json
 		walletIDsMu.Lock()
