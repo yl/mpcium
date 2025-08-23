@@ -23,10 +23,24 @@ import (
 func main() {
 	const environment = "development"
 	numWallets := flag.Int("n", 1, "Number of wallets to generate")
+
 	flag.Parse()
 
 	config.InitViperConfig()
 	logger.Init(environment, false)
+
+	algorithm := viper.GetString("event_initiator_algorithm")
+	if algorithm == "" {
+		algorithm = "ed25519"
+	}
+
+	// Validate algorithm
+	if algorithm != "ed25519" && algorithm != "p256" {
+		logger.Fatal(
+			"Invalid event_initiator_algorithm in config. Must be 'ed25519' or 'p256'",
+			nil,
+		)
+	}
 
 	natsURL := viper.GetString("nats.url")
 	natsConn, err := nats.Connect(natsURL)
@@ -37,8 +51,9 @@ func main() {
 	defer natsConn.Close()
 
 	mpcClient := client.NewMPCClient(client.Options{
-		NatsConn: natsConn,
-		KeyPath:  "./event_initiator.key",
+		Algorithm: algorithm,
+		NatsConn:  natsConn,
+		KeyPath:   "./event_initiator.key",
 	})
 
 	var walletStartTimes sync.Map
@@ -89,13 +104,13 @@ func main() {
 
 	// STEP 3: Create wallets
 	for _, walletID := range walletIDs {
-		wg.Add(1)
 		if err := mpcClient.CreateWallet(walletID); err != nil {
 			logger.Error("CreateWallet failed", err)
 			walletStartTimes.Delete(walletID)
 			wg.Done()
 			continue
 		}
+		wg.Add(1)
 		logger.Info("CreateWallet sent, awaiting result...", "walletID", walletID)
 	}
 

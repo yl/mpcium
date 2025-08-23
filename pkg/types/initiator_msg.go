@@ -6,8 +6,8 @@ type KeyType string
 
 const (
 	KeyTypeSecp256k1 KeyType = "secp256k1"
-	KeyTypeP256      KeyType = "p256"
 	KeyTypeEd25519   KeyType = "ed25519"
+	KeyTypeP256      KeyType = "p256"
 )
 
 // InitiatorMessage is anything that carries a payload to verify and its signature.
@@ -18,13 +18,11 @@ type InitiatorMessage interface {
 	Sig() []byte
 	// InitiatorID returns the ID whose public key we have to look up.
 	InitiatorID() string
-	Algo() string
 }
 
 type GenerateKeyMessage struct {
-	WalletID  string  `json:"wallet_id"`
-	Signature []byte  `json:"signature"`
-	KeyType   KeyType `json:"key_type,omitempty"`
+	WalletID  string `json:"wallet_id"`
+	Signature []byte `json:"signature"`
 }
 
 type SignTxMessage struct {
@@ -43,27 +41,6 @@ type ResharingMessage struct {
 	KeyType      KeyType  `json:"key_type"`
 	WalletID     string   `json:"wallet_id"`
 	Signature    []byte   `json:"signature,omitempty"`
-}
-
-func (m *GenerateKeyMessage) Algo() string {
-	if m.KeyType == "" {
-		return string(KeyTypeEd25519)
-	}
-	return string(m.KeyType)
-}
-
-func (m *SignTxMessage) Algo() string {
-	if m.KeyType == "" {
-		return string(KeyTypeEd25519)
-	}
-	return string(m.KeyType)
-}
-
-func (m *ResharingMessage) Algo() string {
-	if m.KeyType == "" {
-		return string(KeyTypeEd25519)
-	}
-	return string(m.KeyType)
 }
 
 func (m *SignTxMessage) Raw() ([]byte, error) {

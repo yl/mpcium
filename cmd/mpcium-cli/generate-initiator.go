@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,6 +15,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/fystack/mpcium/pkg/common/pathutil"
+	"github.com/fystack/mpcium/pkg/encryption"
 	"github.com/urfave/cli/v3"
 )
 
@@ -30,12 +28,6 @@ type InitiatorIdentity struct {
 	CreatedBy   string `json:"created_by"`
 	MachineOS   string `json:"machine_os"`
 	MachineName string `json:"machine_name"`
-}
-
-// KeyData holds the generated key information
-type KeyData struct {
-	PublicKeyHex  string
-	PrivateKeyHex string
 }
 
 func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
@@ -86,13 +78,13 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	}
 
 	// Generate keys based on algorithm
-	var keyData KeyData
+	var keyData encryption.KeyData
 	var err error
 
 	if algorithm == "ed25519" {
 		keyData, err = generateEd25519Keys()
 	} else {
-		keyData, err = generateP256Keys()
+		keyData, err = encryption.GenerateP256Keys()
 	}
 
 	if err != nil {
@@ -194,40 +186,15 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 }
 
 // generateEd25519Keys generates Ed25519 keypair
-func generateEd25519Keys() (KeyData, error) {
+func generateEd25519Keys() (encryption.KeyData, error) {
 	pubKey, privKeyFull, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return KeyData{}, err
+		return encryption.KeyData{}, err
 	}
 
 	privKeySeed := privKeyFull.Seed()
-	return KeyData{
+	return encryption.KeyData{
 		PublicKeyHex:  hex.EncodeToString(pubKey),
 		PrivateKeyHex: hex.EncodeToString(privKeySeed),
-	}, nil
-}
-
-// generateP256Keys generates P-256 keypair
-func generateP256Keys() (KeyData, error) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return KeyData{}, err
-	}
-
-	// Convert private key to PEM format
-	privateKeyBytes, err := x509.MarshalECPrivateKey(privateKey)
-	if err != nil {
-		return KeyData{}, err
-	}
-
-	// Convert public key to DER format
-	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return KeyData{}, err
-	}
-
-	return KeyData{
-		PublicKeyHex:  hex.EncodeToString(publicKeyBytes),
-		PrivateKeyHex: hex.EncodeToString(privateKeyBytes),
 	}, nil
 }

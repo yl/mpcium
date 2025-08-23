@@ -3,8 +3,6 @@ package identity
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -58,6 +56,12 @@ type Store interface {
 	DecryptMessage(cipher []byte, peerID string) ([]byte, error)
 }
 
+type InitiatorKey struct {
+	Algorithm types.KeyType
+	Ed25519   []byte
+	P256      *ecdsa.PublicKey
+}
+
 // fileStore implements the Store interface using the filesystem
 type fileStore struct {
 	identityDir     string
@@ -67,10 +71,9 @@ type fileStore struct {
 	publicKeys map[string][]byte
 	mu         sync.RWMutex
 
-	privateKey             []byte
-	initiatorPubKeyEd25519 []byte
-	initiatorPubKeyP256    *ecdsa.PublicKey
-	symmetricKeys          map[string][]byte
+	privateKey    []byte
+	initiatorKey  *InitiatorKey
+	symmetricKeys map[string][]byte
 }
 
 // NewFileStore creates a new identity store
@@ -89,7 +92,7 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 		return nil, fmt.Errorf("invalid private key format: %w", err)
 	}
 
-	initiatorPubKeyEd25519, initiatorPubKeyP256, err := loadInitiatorKeys()
+	initiatorKey, err := loadInitiatorKeys()
 	if err != nil {
 		return nil, err
 	}
@@ -106,13 +109,12 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 	}
 
 	store := &fileStore{
-		identityDir:            identityDir,
-		currentNodeName:        nodeName,
-		publicKeys:             make(map[string][]byte),
-		privateKey:             privateKey,
-		initiatorPubKeyEd25519: initiatorPubKeyEd25519,
-		initiatorPubKeyP256:    initiatorPubKeyP256,
-		symmetricKeys:          make(map[string][]byte),
+		identityDir:     identityDir,
+		currentNodeName: nodeName,
+		publicKeys:      make(map[string][]byte),
+		privateKey:      privateKey,
+		initiatorKey:    initiatorKey,
+		symmetricKeys:   make(map[string][]byte),
 	}
 
 	// Check that each node in peers.json has an identity file
@@ -159,7 +161,7 @@ func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error
 	return store, nil
 }
 
-func loadInitiatorKeys() ([]byte, *ecdsa.PublicKey, error) {
+func loadInitiatorKeys() (*InitiatorKey, error) {
 	// Get algorithm configuration with default
 	algorithm := viper.GetString("event_initiator_algorithm")
 	if algorithm == "" {
@@ -168,37 +170,42 @@ func loadInitiatorKeys() ([]byte, *ecdsa.PublicKey, error) {
 
 	// Validate algorithm
 	if algorithm != "ed25519" && algorithm != "p256" {
-		return nil, nil, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"invalid event_initiator_algorithm: %s. Must be 'ed25519' or 'p256'",
 			algorithm,
 		)
 	}
 
-	var initiatorPubKeyEd25519 []byte
-	var initiatorPubKeyP256 *ecdsa.PublicKey
+	var initiatorKey *InitiatorKey
 
 	switch algorithm {
 	case "ed25519":
 		key, err := loadEd25519InitiatorKey()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to load Ed25519 initiator key: %w", err)
+			return nil, fmt.Errorf("failed to load Ed25519 initiator key: %w", err)
 		}
-		initiatorPubKeyEd25519 = key
+		initiatorKey = &InitiatorKey{
+			Algorithm: "ed25519",
+			Ed25519:   key,
+		}
 		logger.Infof("Loaded Ed25519 initiator public key")
 
 	case "p256":
 		key, err := loadP256InitiatorKey()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to load P-256 initiator key: %w", err)
+			return nil, fmt.Errorf("failed to load P-256 initiator key: %w", err)
 		}
-		initiatorPubKeyP256 = key
+		initiatorKey = &InitiatorKey{
+			Algorithm: "p256",
+			P256:      key,
+		}
 		logger.Infof(
 			"Loaded P-256 initiator public key from %s",
 			viper.GetString("event_initiator_pubkey"),
 		)
 	}
 
-	return initiatorPubKeyEd25519, initiatorPubKeyP256, nil
+	return initiatorKey, nil
 }
 
 // loadEd25519InitiatorKey loads Ed25519 initiator public key
@@ -532,11 +539,12 @@ func (s *fileStore) VerifySignature(msg *types.ECDHMessage) error {
 // }
 
 func (s *fileStore) VerifyInitiatorMessage(msg types.InitiatorMessage) error {
-	algo := msg.Algo()
+	algo := s.initiatorKey.Algorithm
+
 	switch algo {
-	case string(types.KeyTypeEd25519):
+	case types.KeyTypeEd25519:
 		return s.verifyEd25519(msg)
-	case string(types.KeyTypeP256):
+	case types.KeyTypeP256:
 		return s.verifyP256(msg)
 	}
 	return fmt.Errorf("unsupported algorithm: %s", algo)
@@ -552,7 +560,7 @@ func (s *fileStore) verifyEd25519(msg types.InitiatorMessage) error {
 		return errors.New("signature is empty")
 	}
 
-	if !ed25519.Verify(s.initiatorPubKeyEd25519, msgBytes, signature) {
+	if !ed25519.Verify(s.initiatorKey.Ed25519, msgBytes, signature) {
 		return fmt.Errorf("invalid signature from initiator")
 	}
 	return nil
@@ -564,24 +572,12 @@ func (s *fileStore) verifyP256(msg types.InitiatorMessage) error {
 		return fmt.Errorf("failed to get raw message data: %w", err)
 	}
 	signature := msg.Sig()
-	if len(signature) == 0 {
-		return errors.New("signature is empty")
-	}
 
-	if s.initiatorPubKeyP256 == nil {
+	if s.initiatorKey.P256 == nil {
 		return fmt.Errorf("initiator public key for secp256r1 is not set")
 	}
-	if s.initiatorPubKeyP256.Curve != elliptic.P256() {
-		return fmt.Errorf("public key is not on P-256 curve")
-	}
 
-	hash := sha256.Sum256(msgBytes)
-
-	if !ecdsa.VerifyASN1(s.initiatorPubKeyP256, hash[:], signature) {
-		return fmt.Errorf("invalid signature from initiator")
-	}
-
-	return nil
+	return encryption.VerifyP256Signature(s.initiatorKey.P256, msgBytes, signature)
 }
 
 func partyIDToNodeID(partyID *tss.PartyID) string {
