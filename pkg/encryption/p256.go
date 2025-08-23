@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -55,16 +56,18 @@ func ParseP256PrivateKey(keyData []byte) (*ecdsa.PrivateKey, error) {
 	return nil, fmt.Errorf("failed to parse P256 private key from DER or hex format")
 }
 
-// SignWithP256 signs data using the P256 private key
+// SignWithP256 signs data using a P256 private key
 func SignWithP256(privateKey *ecdsa.PrivateKey, data []byte) ([]byte, error) {
+	if privateKey == nil {
+		return nil, fmt.Errorf("invalid private key: private key is nil")
+	}
+
 	if privateKey.Curve == nil {
 		return nil, fmt.Errorf("invalid private key: curve is nil")
 	}
 
 	hash := sha256.Sum256(data)
 
-	// Use crypto/ecdsa.Sign to create a proper P256 signature
-	// The signature will be in ASN.1 DER format
 	signature, err := ecdsa.SignASN1(rand.Reader, privateKey, hash[:])
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign data: %w", err)
@@ -115,5 +118,67 @@ func VerifyP256Signature(publicKey *ecdsa.PublicKey, data []byte, signature []by
 		return fmt.Errorf("invalid signature")
 	}
 
+	return nil
+}
+func ParseP256PublicKeyFromBytes(keyBytes []byte) (*ecdsa.PublicKey, error) {
+	// Try to parse as DER first
+	if key, err := x509.ParsePKIXPublicKey(keyBytes); err == nil {
+		if ecdsaKey, ok := key.(*ecdsa.PublicKey); ok {
+			if ecdsaKey.Curve == elliptic.P256() {
+				return ecdsaKey, nil
+			}
+		}
+	}
+
+	// Try to parse as EC public key
+	if key, err := x509.ParsePKIXPublicKey(keyBytes); err == nil {
+		if ecdsaKey, ok := key.(*ecdsa.PublicKey); ok {
+			if ecdsaKey.Curve == elliptic.P256() {
+				return ecdsaKey, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("failed to parse P-256 public key from bytes")
+}
+
+// ParseP256PublicKeyFromHex parses a P-256 public key from hex string
+func ParseP256PublicKeyFromHex(hexString string) (*ecdsa.PublicKey, error) {
+	// Remove 0x prefix if present
+	if strings.HasPrefix(hexString, "0x") {
+		hexString = hexString[2:]
+	}
+
+	// Decode hex
+	keyBytes, err := hex.DecodeString(hexString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode hex string: %w", err)
+	}
+
+	return ParseP256PublicKeyFromBytes(keyBytes)
+}
+
+// ParseP256PublicKeyFromBase64 parses a P-256 public key from base64 string
+func ParseP256PublicKeyFromBase64(base64String string) (*ecdsa.PublicKey, error) {
+	// Decode base64
+	keyBytes, err := base64.StdEncoding.DecodeString(base64String)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64 string: %w", err)
+	}
+
+	return ParseP256PublicKeyFromBytes(keyBytes)
+}
+
+// ValidateP256PublicKey validates that a public key is P-256
+func ValidateP256PublicKey(publicKey *ecdsa.PublicKey) error {
+	if publicKey == nil {
+		return fmt.Errorf("public key is nil")
+	}
+	if publicKey.Curve == nil {
+		return fmt.Errorf("public key curve is nil")
+	}
+	if publicKey.Curve != elliptic.P256() {
+		return fmt.Errorf("public key is not P-256 curve (got: %s)", publicKey.Curve.Params().Name)
+	}
 	return nil
 }

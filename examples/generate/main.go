@@ -104,13 +104,15 @@ func main() {
 
 	// STEP 3: Create wallets
 	for _, walletID := range walletIDs {
+		wg.Add(1) // Add to WaitGroup BEFORE attempting to create wallet
+
 		if err := mpcClient.CreateWallet(walletID); err != nil {
 			logger.Error("CreateWallet failed", err)
 			walletStartTimes.Delete(walletID)
-			wg.Done()
+			wg.Done() // Now this is safe since we added 1 above
 			continue
 		}
-		wg.Add(1)
+
 		logger.Info("CreateWallet sent, awaiting result...", "walletID", walletID)
 	}
 

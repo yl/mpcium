@@ -3,11 +3,8 @@ package identity
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -229,65 +226,22 @@ func loadP256InitiatorKey() (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("event_initiator_pubkey not found in config")
 	}
 
-	// Try to decode as hex first
-	pubKeyBytes, err := hex.DecodeString(pubKeyHex)
-	if err != nil {
-		// If hex decoding fails, try base64
-		pubKeyBytes, err = base64.StdEncoding.DecodeString(pubKeyHex)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to decode event_initiator_pubkey as hex or base64: %w",
-				err,
-			)
-		}
+	// Use the new P256 functions from p256.go
+	publicKey, err := encryption.ParseP256PublicKeyFromHex(pubKeyHex)
+	if err == nil {
+		return publicKey, nil
 	}
 
-	// Convert DER bytes to PEM format
-	pemBlock := &pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: pubKeyBytes,
-	}
-	pemBytes := pem.EncodeToMemory(pemBlock)
-
-	// Now parse with your existing function
-	return parseAndValidateP256Key(pemBytes)
-}
-
-// parseAndValidateP256Key parses and validates a P-256 public key from bytes
-func parseAndValidateP256Key(keyBytes []byte) (*ecdsa.PublicKey, error) {
-	// Decode PEM block
-	block, _ := pem.Decode(keyBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM block")
+	// If hex parsing fails, try base64
+	publicKey, err = encryption.ParseP256PublicKeyFromBase64(pubKeyHex)
+	if err == nil {
+		return publicKey, nil
 	}
 
-	// Parse public key
-	var pubKey interface{}
-	var err error
-	if block.Type == "PUBLIC KEY" || block.Type == "EC PUBLIC KEY" {
-		pubKey, err = x509.ParsePKIXPublicKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse public key: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("unsupported PEM type: %s", block.Type)
-	}
-
-	// Verify it's an ECDSA P-256 key
-	ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("public key is not an ECDSA key")
-	}
-
-	// Check if it's P-256 curve
-	if ecdsaPubKey.Curve.Params().Name != "P-256" {
-		return nil, fmt.Errorf(
-			"public key is not P-256 curve (got: %s)",
-			ecdsaPubKey.Curve.Params().Name,
-		)
-	}
-
-	return ecdsaPubKey, nil
+	return nil, fmt.Errorf(
+		"failed to decode event_initiator_pubkey as hex or base64: %w",
+		err,
+	)
 }
 
 // loadPrivateKey loads the private key from file, decrypting if necessary
@@ -515,28 +469,6 @@ func (s *fileStore) VerifySignature(msg *types.ECDHMessage) error {
 
 	return nil
 }
-
-// // VerifyInitiatorMessage verifies that a message was signed by the known initiator
-// func (s *fileStore) VerifyInitiatorMessage(msg types.InitiatorMessage) error {
-// 	// Get the raw message that was signed
-// 	msgBytes, err := msg.Raw()
-// 	if err != nil {
-// 		return fmt.Errorf("failed to get raw message data: %w", err)
-// 	}
-
-// 	// Get the signature
-// 	signature := msg.Sig()
-// 	if len(signature) == 0 {
-// 		return errors.New("signature is empty")
-// 	}
-
-// 	// Verify the signature using the initiator's public key
-// 	if !ed25519.Verify(s.initiatorPubKey, msgBytes, signature) {
-// 		return fmt.Errorf("invalid signature from initiator")
-// 	}
-
-// 	return nil
-// }
 
 func (s *fileStore) VerifyInitiatorMessage(msg types.InitiatorMessage) error {
 	algo := s.initiatorKey.Algorithm
