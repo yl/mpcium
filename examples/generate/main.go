@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"github.com/fystack/mpcium/pkg/config"
 	"github.com/fystack/mpcium/pkg/event"
 	"github.com/fystack/mpcium/pkg/logger"
+	"github.com/fystack/mpcium/pkg/types"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/spf13/viper"
@@ -31,13 +33,20 @@ func main() {
 
 	algorithm := viper.GetString("event_initiator_algorithm")
 	if algorithm == "" {
-		algorithm = "ed25519"
+		algorithm = string(types.KeyTypeEd25519)
 	}
 
-	// Validate algorithm
-	if algorithm != "ed25519" && algorithm != "p256" {
+	if !slices.Contains(
+		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		algorithm,
+	) {
 		logger.Fatal(
-			"Invalid event_initiator_algorithm in config. Must be 'ed25519' or 'p256'",
+			fmt.Sprintf(
+				"invalid algorithm: %s. Must be %s or %s",
+				algorithm,
+				types.KeyTypeEd25519,
+				types.KeyTypeP256,
+			),
 			nil,
 		)
 	}

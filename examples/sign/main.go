@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/fystack/mpcium/pkg/client"
@@ -23,13 +24,21 @@ func main() {
 
 	algorithm := viper.GetString("event_initiator_algorithm")
 	if algorithm == "" {
-		algorithm = "ed25519"
+		algorithm = string(types.KeyTypeEd25519)
 	}
 
 	// Validate algorithm
-	if algorithm != "ed25519" && algorithm != "p256" {
+	if !slices.Contains(
+		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		algorithm,
+	) {
 		logger.Fatal(
-			"Invalid event_initiator_algorithm in config. Must be 'ed25519' or 'p256'",
+			fmt.Sprintf(
+				"invalid algorithm: %s. Must be %s or %s",
+				algorithm,
+				types.KeyTypeEd25519,
+				types.KeyTypeP256,
+			),
 			nil,
 		)
 	}
@@ -54,9 +63,9 @@ func main() {
 	// Determine key type based on algorithm
 	var keyType types.KeyType
 	switch algorithm {
-	case "ed25519":
+	case string(types.KeyTypeEd25519):
 		keyType = types.KeyTypeEd25519
-	case "p256":
+	case string(types.KeyTypeP256):
 		keyType = types.KeyTypeP256
 	default:
 		logger.Fatal("Unsupported algorithm", nil)
