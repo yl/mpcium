@@ -41,7 +41,7 @@ type MPCClient interface {
 type InitiatorPrivKey struct {
 	Algorithm types.KeyType
 	Ed25519   ed25519.PrivateKey
-	P256      ecdsa.PrivateKey
+	P256      *ecdsa.PrivateKey
 }
 
 type mpcClient struct {
@@ -80,6 +80,11 @@ func NewMPCClient(opts Options) MPCClient {
 	// Set default paths if not provided
 	if opts.KeyPath == "" {
 		opts.KeyPath = filepath.Join(".", "event_initiator.key")
+	}
+
+	// Set default algorithm if not provided
+	if opts.Algorithm == "" {
+		opts.Algorithm = "ed25519"
 	}
 
 	if strings.HasSuffix(opts.KeyPath, ".age") {
@@ -178,6 +183,17 @@ func NewMPCClient(opts Options) MPCClient {
 	signResultQueue := manager.NewMessageQueue("mpc_signing_result")
 	reshareSuccessQueue := manager.NewMessageQueue("mpc_reshare_result")
 
+	// Create initiatorPrivKey based on algorithm
+	initiatorPrivKey := &InitiatorPrivKey{
+		Algorithm: types.KeyType(opts.Algorithm),
+		Ed25519:   priv,
+	}
+
+	// Only set P256 key if it exists (for p256 algorithm)
+	if privECDSA != nil {
+		initiatorPrivKey.P256 = privECDSA
+	}
+
 	return &mpcClient{
 		signingBroker:       signingBroker,
 		keygenBroker:        keygenBroker,
@@ -187,11 +203,7 @@ func NewMPCClient(opts Options) MPCClient {
 		reshareSuccessQueue: reshareSuccessQueue,
 		// privKey:             priv,
 		// privKeyECDSA:        privECDSA,
-		initiatorPrivKey: &InitiatorPrivKey{
-			Algorithm: types.KeyType(opts.Algorithm),
-			Ed25519:   priv,
-			P256:      *privECDSA,
-		},
+		initiatorPrivKey: initiatorPrivKey,
 		algorithm: opts.Algorithm,
 	}
 }
@@ -237,7 +249,7 @@ func (c *mpcClient) CreateWallet(walletID string) error {
 		if c.initiatorPrivKey.P256.Curve == nil {
 			return fmt.Errorf("CreateWallet: P256 private key not initialized")
 		}
-		signature, err = encryption.SignWithP256(&c.initiatorPrivKey.P256, raw)
+		signature, err = encryption.SignWithP256(c.initiatorPrivKey.P256, raw)
 		if err != nil {
 			return fmt.Errorf("CreateWallet: failed to create P256 signature: %w", err)
 		}
@@ -292,7 +304,7 @@ func (c *mpcClient) SignTransaction(msg *types.SignTxMessage) error {
 		if c.initiatorPrivKey.P256.Curve == nil {
 			return fmt.Errorf("SignTransaction: P256 private key not initialized")
 		}
-		signature, err = encryption.SignWithP256(&c.initiatorPrivKey.P256, raw)
+		signature, err = encryption.SignWithP256(c.initiatorPrivKey.P256, raw)
 		if err != nil {
 			return fmt.Errorf("SignTransaction: failed to create P256 signature: %w", err)
 		}
@@ -345,7 +357,7 @@ func (c *mpcClient) Resharing(msg *types.ResharingMessage) error {
 		if c.initiatorPrivKey.P256.Curve == nil {
 			return fmt.Errorf("Resharing: P256 private key not initialized")
 		}
-		signature, err = encryption.SignWithP256(&c.initiatorPrivKey.P256, raw)
+		signature, err = encryption.SignWithP256(c.initiatorPrivKey.P256, raw)
 		if err != nil {
 			return fmt.Errorf("Resharing: failed to create P256 signature: %w", err)
 		}

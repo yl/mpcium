@@ -118,7 +118,14 @@ func TestParseP256PrivateKey_InvalidInput(t *testing.T) {
 	cases := [][]byte{
 		[]byte("invalid-hex"),
 		{},
-		func() []byte { b := make([]byte, 32); rand.Read(b); return b }(),
+		func() []byte {
+			b := make([]byte, 32)
+			_, err := rand.Read(b)
+			if err != nil {
+				t.Fatalf("Failed to generate random bytes: %v", err)
+			}
+			return b
+		}(),
 	}
 
 	for _, in := range cases {
@@ -285,7 +292,10 @@ func TestVerifyP256Signature_InvalidCases(t *testing.T) {
 func TestParseP256PublicKeyFromBytes_Invalid(t *testing.T) {
 	// Random bytes that are not a public key
 	randomBytes := make([]byte, 64)
-	rand.Read(randomBytes)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		t.Fatalf("Failed to generate random bytes: %v", err)
+	}
 
 	if _, err := ParseP256PublicKeyFromBytes(randomBytes); err == nil {
 		t.Error("Expected error for invalid public key bytes")
