@@ -21,6 +21,18 @@ func main() {
 	config.InitViperConfig()
 	logger.Init(environment, true)
 
+	algorithm := viper.GetString("event_initiator_algorithm")
+	if algorithm == "" {
+		algorithm = "ed25519"
+	}
+
+	// Validate algorithm
+	if algorithm != "ed25519" && algorithm != "p256" {
+		logger.Fatal(
+			"Invalid event_initiator_algorithm in config. Must be 'ed25519' or 'p256'",
+			nil,
+		)
+	}
 	natsURL := viper.GetString("nats.url")
 	natsConn, err := nats.Connect(natsURL)
 	if err != nil {
@@ -30,8 +42,9 @@ func main() {
 	defer natsConn.Close()
 
 	mpcClient := client.NewMPCClient(client.Options{
-		NatsConn: natsConn,
-		KeyPath:  "./event_initiator.key",
+		Algorithm: algorithm,
+		NatsConn:  natsConn,
+		KeyPath:   "./event_initiator.key",
 	})
 
 	// 3) Listen for signing results
@@ -46,14 +59,27 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to subscribe to OnResharingResult", err)
 	}
+	// Determine key type based on algorithm
+	var keyType types.KeyType
+	switch algorithm {
+	case "ed25519":
+		keyType = types.KeyTypeEd25519
+	case "p256":
+		keyType = types.KeyTypeP256
+	default:
+		logger.Fatal("Unsupported algorithm", nil)
+	}
 
 	resharingMsg := &types.ResharingMessage{
 		SessionID: uuid.NewString(),
 		WalletID:  "506d2d40-483a-49f1-93c8-27dd4fe9740c",
-		NodeIDs:   []string{"c95c340e-5a18-472d-b9b0-5ac68218213a", "ac37e85f-caca-4bee-8a3a-49a0fe35abff"}, // new peer IDs
+		NodeIDs: []string{
+			"c95c340e-5a18-472d-b9b0-5ac68218213a",
+			"ac37e85f-caca-4bee-8a3a-49a0fe35abff",
+		}, // new peer IDs
 
 		NewThreshold: 1, // t+1 <= len(NodeIDs)
-		KeyType:      types.KeyTypeEd25519,
+		KeyType:      keyType,
 	}
 	err = mpcClient.Resharing(resharingMsg)
 	if err != nil {

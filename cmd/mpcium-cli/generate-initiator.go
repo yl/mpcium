@@ -11,11 +11,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"filippo.io/age"
 	"github.com/fystack/mpcium/pkg/common/pathutil"
 	"github.com/fystack/mpcium/pkg/encryption"
+	"github.com/fystack/mpcium/pkg/types"
 	"github.com/urfave/cli/v3"
 )
 
@@ -38,11 +40,18 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	algorithm := c.String("algorithm")
 
 	if algorithm == "" {
-		algorithm = "ed25519"
+		algorithm = string(types.KeyTypeEd25519)
 	}
 
-	if algorithm != "ed25519" && algorithm != "p256" {
-		return fmt.Errorf("invalid algorithm: %s. Must be 'ed25519' or 'p256'", algorithm)
+	if !slices.Contains(
+		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		algorithm,
+	) {
+		return fmt.Errorf("invalid algorithm: %s. Must be %s or %s",
+			algorithm,
+			types.KeyTypeEd25519,
+			types.KeyTypeP256,
+		)
 	}
 
 	// Create output directory if it doesn't exist
@@ -81,9 +90,9 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	var keyData encryption.KeyData
 	var err error
 
-	if algorithm == "ed25519" {
+	if algorithm == string(types.KeyTypeEd25519) {
 		keyData, err = generateEd25519Keys()
-	} else {
+	} else if algorithm == string(types.KeyTypeP256) {
 		keyData, err = encryption.GenerateP256Keys()
 	}
 

@@ -33,9 +33,7 @@ func ParseP256PrivateKey(keyData []byte) (*ecdsa.PrivateKey, error) {
 
 	// Try to parse as hex string
 	keyStr := strings.TrimSpace(string(keyData))
-	if strings.HasPrefix(keyStr, "0x") {
-		keyStr = keyStr[2:]
-	}
+	keyStr = strings.TrimPrefix(keyStr, "0x")
 
 	keyBytes, err := hex.DecodeString(keyStr)
 	if err != nil {
@@ -144,12 +142,7 @@ func ParseP256PublicKeyFromBytes(keyBytes []byte) (*ecdsa.PublicKey, error) {
 
 // ParseP256PublicKeyFromHex parses a P-256 public key from hex string
 func ParseP256PublicKeyFromHex(hexString string) (*ecdsa.PublicKey, error) {
-	// Remove 0x prefix if present
-	if strings.HasPrefix(hexString, "0x") {
-		hexString = hexString[2:]
-	}
-
-	// Decode hex
+	hexString = strings.TrimPrefix(hexString, "0x")
 	keyBytes, err := hex.DecodeString(hexString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode hex string: %w", err)
@@ -160,7 +153,6 @@ func ParseP256PublicKeyFromHex(hexString string) (*ecdsa.PublicKey, error) {
 
 // ParseP256PublicKeyFromBase64 parses a P-256 public key from base64 string
 func ParseP256PublicKeyFromBase64(base64String string) (*ecdsa.PublicKey, error) {
-	// Decode base64
 	keyBytes, err := base64.StdEncoding.DecodeString(base64String)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base64 string: %w", err)
