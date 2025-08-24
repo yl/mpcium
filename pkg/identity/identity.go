@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -162,21 +163,25 @@ func loadInitiatorKeys() (*InitiatorKey, error) {
 	// Get algorithm configuration with default
 	algorithm := viper.GetString("event_initiator_algorithm")
 	if algorithm == "" {
-		algorithm = "ed25519"
+		algorithm = string(types.KeyTypeEd25519)
 	}
 
 	// Validate algorithm
-	if algorithm != "ed25519" && algorithm != "p256" {
-		return nil, fmt.Errorf(
-			"invalid event_initiator_algorithm: %s. Must be 'ed25519' or 'p256'",
+	if !slices.Contains(
+		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		algorithm,
+	) {
+		return nil, fmt.Errorf("invalid algorithm: %s. Must be %s or %s",
 			algorithm,
+			types.KeyTypeEd25519,
+			types.KeyTypeP256,
 		)
 	}
 
 	var initiatorKey *InitiatorKey
 
 	switch algorithm {
-	case "ed25519":
+	case string(types.KeyTypeEd25519):
 		key, err := loadEd25519InitiatorKey()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load Ed25519 initiator key: %w", err)
@@ -187,7 +192,7 @@ func loadInitiatorKeys() (*InitiatorKey, error) {
 		}
 		logger.Infof("Loaded Ed25519 initiator public key")
 
-	case "p256":
+	case string(types.KeyTypeP256):
 		key, err := loadP256InitiatorKey()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load P-256 initiator key: %w", err)
