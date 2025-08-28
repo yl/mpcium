@@ -153,40 +153,260 @@ $ mpcium start -n node2
 - **Go**: Available in the `pkg/client` directory. Check the `examples` folder for usage samples.
 - **TypeScript**: Available at [github.com/fystack/mpcium-client-ts](https://github.com/fystack/mpcium-client-ts)
 
-### Client
+### Client Usage
+
+Mpcium supports flexible client authentication through a signer interface, allowing you to use either local keys or AWS KMS for signing operations.
+
+#### Local Signer (Ed25519)
 
 ```go
-
 import (
-    "github.com/fystack/mpcium/client"
+    "github.com/fystack/mpcium/pkg/client"
+    "github.com/fystack/mpcium/pkg/event"
+    "github.com/fystack/mpcium/pkg/types"
+    "github.com/google/uuid"
     "github.com/nats-io/nats.go"
 )
 
+func main() {
+    // Connect to NATS
+    natsConn, err := nats.Connect(natsURL)
+    if err != nil {
+        logger.Fatal("Failed to connect to NATS", err)
+    }
+    defer natsConn.Close()
 
-func main () {
-	natsConn, err := nats.Connect(natsURL)
-	if err != nil {
-		logger.Fatal("Failed to connect to NATS", err)
-	}
-	defer natsConn.Close()
-	mpcClient := client.NewMPCClient(client.Options{
-		NatsConn: natsConn,
-		KeyPath:  "./event_initiator.key",
-	})
-	err = mpcClient.OnWalletCreationResult(func(event event.KeygenSuccessEvent) {
-		logger.Info("Received wallet creation result", "event", event)
-	})
-	if err != nil {
-		logger.Fatal("Failed to subscribe to wallet-creation results", err)
-	}
+    // Create local signer with Ed25519 key
+    localSigner, err := client.NewLocalSigner(types.EventInitiatorKeyTypeEd25519, client.LocalSignerOptions{
+        KeyPath: "./event_initiator.key",
+    })
+    if err != nil {
+        logger.Fatal("Failed to create local signer", err)
+    }
 
-	walletID := uuid.New().String()
-	if err := mpcClient.CreateWallet(walletID); err != nil {
-		logger.Fatal("CreateWallet failed", err)
-	}
-	logger.Info("CreateWallet sent, awaiting result...", "walletID", walletID)
+    // Create MPC client with signer
+    mpcClient := client.NewMPCClient(client.Options{
+        NatsConn: natsConn,
+        Signer:   localSigner,
+    })
+
+    // Handle wallet creation results
+    err = mpcClient.OnWalletCreationResult(func(event event.KeygenResultEvent) {
+        logger.Info("Received wallet creation result", "event", event)
+    })
+    if err != nil {
+        logger.Fatal("Failed to subscribe to wallet-creation results", err)
+    }
+
+    // Create a wallet
+    walletID := uuid.New().String()
+    if err := mpcClient.CreateWallet(walletID); err != nil {
+        logger.Fatal("CreateWallet failed", err)
+    }
+    logger.Info("CreateWallet sent, awaiting result...", "walletID", walletID)
 }
 ```
+
+#### Local Signer (P256 with encrypted key)
+
+```go
+// Create local signer with P256 key (encrypted with age)
+localSigner, err := client.NewLocalSigner(types.EventInitiatorKeyTypeP256, client.LocalSignerOptions{
+    KeyPath:   "./event_initiator_p256.key.age",
+    Encrypted: true,
+    Password:  "your-encryption-password",
+})
+```
+
+#### AWS KMS Signer
+
+##### Production (IAM Role-based Authentication)
+
+For production environments using IAM roles (recommended):
+
+```go
+import (
+    "github.com/fystack/mpcium/pkg/client"
+    "github.com/fystack/mpcium/pkg/types"
+)
+
+func main() {
+    // KMS signer with role-based authentication (no static credentials)
+    kmsSigner, err := client.NewKMSSigner(types.EventInitiatorKeyTypeP256, client.KMSSignerOptions{
+        Region: "us-east-1",
+        KeyID:  "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
+        // No AccessKeyID/SecretAccessKey - uses IAM role
+    })
+    if err != nil {
+        logger.Fatal("Failed to create KMS signer", err)
+    }
+
+    mpcClient := client.NewMPCClient(client.Options{
+        NatsConn: natsConn,
+        Signer:   kmsSigner,
+    })
+    // ... rest of the client code
+}
+```
+
+##### Development with Static Credentials
+
+```go
+// KMS signer with static credentials (development only)
+kmsSigner, err := client.NewKMSSigner(types.EventInitiatorKeyTypeP256, client.KMSSignerOptions{
+    Region:          "us-west-2",
+    KeyID:           "12345678-1234-1234-1234-123456789012",
+    AccessKeyID:     "AKIA...",
+    SecretAccessKey: "...",
+})
+```
+
+##### LocalStack Development
+
+```go
+// KMS signer with LocalStack for local development
+kmsSigner, err := client.NewKMSSigner(types.EventInitiatorKeyTypeP256, client.KMSSignerOptions{
+    Region:          "us-east-1",
+    KeyID:           "48e76117-fd08-4dc0-bd10-b1c7d01de748",
+    EndpointURL:     "http://localhost:4566",  // LocalStack endpoint
+    AccessKeyID:     "test",                   // LocalStack dummy credentials
+    SecretAccessKey: "test",
+})
+```
+
+##### AWS Cloud Config Variations
+
+```go
+// Different regions and key formats
+configs := []client.KMSSignerOptions{
+    // Key ID only
+    {
+        Region: "eu-west-1",
+        KeyID:  "12345678-1234-1234-1234-123456789012",
+    },
+    // Full ARN
+    {
+        Region: "ap-southeast-1", 
+        KeyID:  "arn:aws:kms:ap-southeast-1:123456789012:key/12345678-1234-1234-1234-123456789012",
+    },
+    // Key alias
+    {
+        Region: "us-east-2",
+        KeyID:  "alias/mpcium-signing-key",
+    },
+}
+```
+
+**Note**: AWS KMS only supports P256 (ECDSA) keys, not Ed25519. If you need Ed25519, use the local signer.
+
+## Test with AWS KMS (LocalStack)
+
+For local development and testing with AWS KMS functionality, you can use LocalStack to simulate AWS KMS services.
+
+### Setup LocalStack
+
+1. **Install and start LocalStack:**
+   ```bash
+   # Using Docker
+   docker run -d \
+     -p 4566:4566 \
+     -p 4510-4559:4510-4559 \
+     localstack/localstack
+   
+   # Or using LocalStack CLI
+   pip install localstack
+   localstack start
+   ```
+
+2. **Configure AWS CLI for LocalStack:**
+   ```bash
+   aws configure set aws_access_key_id test
+   aws configure set aws_secret_access_key test
+   aws configure set region us-east-1
+   ```
+
+### Create P256 Key in LocalStack
+
+1. **Create a P256 keypair in AWS KMS:**
+   ```bash
+   aws kms create-key \
+     --endpoint-url=http://localhost:4566 \
+     --description "Test P-256 keypair for Mpcium" \
+     --key-usage SIGN_VERIFY \
+     --customer-master-key-spec ECC_NIST_P256
+   ```
+
+   Expected response:
+   ```json
+   {
+       "KeyMetadata": {
+           "AWSAccountId": "000000000000",
+           "KeyId": "330a9df7-4fd9-4e86-bfc5-f360b4c4be39",
+           "Arn": "arn:aws:kms:us-east-1:000000000000:key/330a9df7-4fd9-4e86-bfc5-f360b4c4be39",
+           "CreationDate": "2025-08-28T16:42:18.487655+07:00",
+           "Enabled": true,
+           "Description": "Test P-256 keypair for Mpcium",
+           "KeyUsage": "SIGN_VERIFY",
+           "KeyState": "Enabled",
+           "Origin": "AWS_KMS",
+           "KeyManager": "CUSTOMER",
+           "CustomerMasterKeySpec": "ECC_NIST_P256",
+           "KeySpec": "ECC_NIST_P256",
+           "SigningAlgorithms": [
+               "ECDSA_SHA_256"
+           ],
+           "MultiRegion": false
+       }
+   }
+   ```
+
+2. **Get the public key (save the KeyId from step 1):**
+   ```bash
+   export KMS_KEY_ID="330a9df7-4fd9-4e86-bfc5-f360b4c4be39"  # Replace with your KeyId
+   
+   aws kms get-public-key \
+     --endpoint-url=http://localhost:4566 \
+     --key-id $KMS_KEY_ID \
+     --query PublicKey \
+     --output text | base64 -d | xxd -p -c 256
+   ```
+
+   Expected response (hex-encoded public key):
+   ```
+   3059301306072a8648ce3d020106082a8648ce3d030107034200042b7539fc51123c3ba53c71e244be71d2d3138cbed4909fa259b924b56c92148cadd410cf98b789269d7f672c3ba978e99fc1f01c87daee97292d3666357738fd
+   ```
+
+### Configure Mpcium for LocalStack KMS
+
+Update your `config.yaml` file with the KMS public key and algorithm:
+
+```yaml
+# MPC Configuration  
+mpc_threshold: 2
+event_initiator_pubkey: "3059301306072a8648ce3d020106082a8648ce3d030107034200042b7539fc51123c3ba53c71e244be71d2d3138cbed4909fa259b924b56c92148cadd410cf98b789269d7f672c3ba978e99fc1f01c87daee97292d3666357738fd"
+event_initiator_algorithm: "p256"
+
+# Other configuration...
+nats:
+  url: "nats://localhost:4222"
+consul:
+  address: "localhost:8500"
+```
+
+### Test KMS Integration
+
+Run the KMS example:
+
+```bash
+# Run the KMS example directly
+go run examples/generate/kms/main.go -n 1
+```
+
+The example will:
+1. Connect to LocalStack KMS endpoint
+2. Load the P256 public key from KMS
+3. Use KMS for signing wallet creation events
+4. Generate wallets using the MPC cluster
 
 ### Testing
 
