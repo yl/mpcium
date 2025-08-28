@@ -54,7 +54,7 @@ type mpcClient struct {
 	// privKey             ed25519.PrivateKey
 	// privKeyECDSA        *ecdsa.PrivateKey
 	initiatorPrivKey *InitiatorPrivKey
-	algorithm        string
+	algorithm        types.EventInitiatorKeyType
 }
 
 // Options defines configuration options for creating a new MPCClient
@@ -70,7 +70,7 @@ type Options struct {
 	Password  string // Password for encrypted key
 
 	// Algorithm for key type
-	Algorithm string // Either "ed25519" or "p256" (default: "ed25519")
+	Algorithm types.EventInitiatorKeyType // Either "ed25519" or "p256" (default: "ed25519")
 }
 
 // NewMPCClient creates a new MPC client using the provided options.
@@ -83,8 +83,8 @@ func NewMPCClient(opts Options) MPCClient {
 	}
 
 	// Set default algorithm if not provided
-	if opts.Algorithm == "" {
-		opts.Algorithm = "ed25519"
+	if opts.Algorithm == types.EventInitiatorKeyType("") {
+		opts.Algorithm = types.EventInitiatorKeyTypeEd25519
 	}
 
 	if strings.HasSuffix(opts.KeyPath, ".age") {
@@ -127,7 +127,7 @@ func NewMPCClient(opts Options) MPCClient {
 	var priv ed25519.PrivateKey
 	var privECDSA *ecdsa.PrivateKey
 
-	if opts.Algorithm == "p256" {
+	if opts.Algorithm == types.EventInitiatorKeyTypeP256 {
 		// Parse P256 key
 		privECDSA, err = encryption.ParseP256PrivateKey(privHexBytes)
 		if err != nil {
@@ -240,10 +240,11 @@ func (c *mpcClient) CreateWallet(walletID string) error {
 	if err != nil {
 		return fmt.Errorf("CreateWallet: raw payload error: %w", err)
 	}
-	logger.Info("Raw payload for signing", "raw", string(raw), "raw_bytes", raw)
 	// sign based on algorithm
 	var signature []byte
-	if c.algorithm == "p256" {
+
+	switch c.algorithm {
+	case types.EventInitiatorKeyTypeP256:
 		if c.initiatorPrivKey.P256.Curve == nil {
 			return fmt.Errorf("CreateWallet: P256 private key not initialized")
 		}
@@ -251,11 +252,10 @@ func (c *mpcClient) CreateWallet(walletID string) error {
 		if err != nil {
 			return fmt.Errorf("CreateWallet: failed to create P256 signature: %w", err)
 		}
-		if signature == nil {
-			return fmt.Errorf("CreateWallet: failed to create P256 signature")
-		}
-	} else {
+	case types.EventInitiatorKeyTypeEd25519:
 		signature = ed25519.Sign(c.initiatorPrivKey.Ed25519, raw)
+	default:
+		return fmt.Errorf("CreateWallet: unsupported algorithm: %s", c.algorithm)
 	}
 	msg.Signature = signature
 
@@ -298,7 +298,8 @@ func (c *mpcClient) SignTransaction(msg *types.SignTxMessage) error {
 	}
 	// sign based on algorithm
 	var signature []byte
-	if c.algorithm == "p256" {
+	switch c.algorithm {
+	case types.EventInitiatorKeyTypeP256:
 		if c.initiatorPrivKey.P256.Curve == nil {
 			return fmt.Errorf("SignTransaction: P256 private key not initialized")
 		}
@@ -306,11 +307,10 @@ func (c *mpcClient) SignTransaction(msg *types.SignTxMessage) error {
 		if err != nil {
 			return fmt.Errorf("SignTransaction: failed to create P256 signature: %w", err)
 		}
-		if signature == nil {
-			return fmt.Errorf("SignTransaction: failed to create P256 signature")
-		}
-	} else {
+	case types.EventInitiatorKeyTypeEd25519:
 		signature = ed25519.Sign(c.initiatorPrivKey.Ed25519, raw)
+	default:
+		return fmt.Errorf("SignTransaction: unsupported algorithm: %s", c.algorithm)
 	}
 	msg.Signature = signature
 
@@ -351,7 +351,8 @@ func (c *mpcClient) Resharing(msg *types.ResharingMessage) error {
 	}
 	// sign based on algorithm
 	var signature []byte
-	if c.algorithm == "p256" {
+	switch c.algorithm {
+	case types.EventInitiatorKeyTypeP256:
 		if c.initiatorPrivKey.P256.Curve == nil {
 			return fmt.Errorf("Resharing: P256 private key not initialized")
 		}
@@ -359,11 +360,10 @@ func (c *mpcClient) Resharing(msg *types.ResharingMessage) error {
 		if err != nil {
 			return fmt.Errorf("Resharing: failed to create P256 signature: %w", err)
 		}
-		if signature == nil {
-			return fmt.Errorf("Resharing: failed to create P256 signature")
-		}
-	} else {
+	case types.EventInitiatorKeyTypeEd25519:
 		signature = ed25519.Sign(c.initiatorPrivKey.Ed25519, raw)
+	default:
+		return fmt.Errorf("Resharing: unsupported algorithm: %s", c.algorithm)
 	}
 	msg.Signature = signature
 

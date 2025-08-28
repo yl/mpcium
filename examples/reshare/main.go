@@ -29,7 +29,10 @@ func main() {
 
 	// Validate algorithm
 	if !slices.Contains(
-		[]string{string(types.EventInitiatorKeyTypeEd25519), string(types.EventInitiatorKeyTypeP256)},
+		[]string{
+			string(types.EventInitiatorKeyTypeEd25519),
+			string(types.EventInitiatorKeyTypeP256),
+		},
 		algorithm,
 	) {
 		logger.Fatal(
@@ -51,7 +54,7 @@ func main() {
 	defer natsConn.Close()
 
 	mpcClient := client.NewMPCClient(client.Options{
-		Algorithm: algorithm,
+		Algorithm: types.EventInitiatorKeyType(algorithm),
 		NatsConn:  natsConn,
 		KeyPath:   "./event_initiator.key",
 	})
