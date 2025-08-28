@@ -55,7 +55,7 @@ type Store interface {
 }
 
 type InitiatorKey struct {
-	Algorithm types.KeyType
+	Algorithm types.EventInitiatorKeyType
 	Ed25519   []byte
 	P256      *ecdsa.PublicKey
 }
@@ -168,20 +168,20 @@ func loadInitiatorKeys() (*InitiatorKey, error) {
 
 	// Validate algorithm
 	if !slices.Contains(
-		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		[]string{string(types.EventInitiatorKeyTypeEd25519), string(types.EventInitiatorKeyTypeP256)},
 		algorithm,
 	) {
 		return nil, fmt.Errorf("invalid algorithm: %s. Must be %s or %s",
 			algorithm,
-			types.KeyTypeEd25519,
-			types.KeyTypeP256,
+			types.EventInitiatorKeyTypeEd25519,
+			types.EventInitiatorKeyTypeP256,
 		)
 	}
 
 	var initiatorKey *InitiatorKey
 
 	switch algorithm {
-	case string(types.KeyTypeEd25519):
+	case string(types.EventInitiatorKeyTypeEd25519):
 		key, err := loadEd25519InitiatorKey()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load Ed25519 initiator key: %w", err)
@@ -192,7 +192,7 @@ func loadInitiatorKeys() (*InitiatorKey, error) {
 		}
 		logger.Infof("Loaded Ed25519 initiator public key")
 
-	case string(types.KeyTypeP256):
+	case string(types.EventInitiatorKeyTypeP256):
 		key, err := loadP256InitiatorKey()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load P-256 initiator key: %w", err)
@@ -217,12 +217,14 @@ func loadEd25519InitiatorKey() ([]byte, error) {
 		return nil, fmt.Errorf("event_initiator_pubkey not found in config")
 	}
 
-	key, err := hex.DecodeString(pubKeyHex)
+	key, err := encryption.ParseEd25519PublicKeyFromHex(pubKeyHex)
+
 	if err != nil {
-		return nil, fmt.Errorf("invalid initiator public key format: %w", err)
+		return nil, fmt.Errorf("failed to decode event_initiator_pubkey as hex: %w", err)
 	}
 
 	return key, nil
+
 }
 
 func loadP256InitiatorKey() (*ecdsa.PublicKey, error) {
@@ -479,9 +481,9 @@ func (s *fileStore) VerifyInitiatorMessage(msg types.InitiatorMessage) error {
 	algo := s.initiatorKey.Algorithm
 
 	switch algo {
-	case types.KeyTypeEd25519:
+	case types.EventInitiatorKeyTypeEd25519:
 		return s.verifyEd25519(msg)
-	case types.KeyTypeP256:
+	case types.EventInitiatorKeyTypeP256:
 		return s.verifyP256(msg)
 	}
 	return fmt.Errorf("unsupported algorithm: %s", algo)

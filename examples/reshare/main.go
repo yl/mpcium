@@ -24,20 +24,20 @@ func main() {
 
 	algorithm := viper.GetString("event_initiator_algorithm")
 	if algorithm == "" {
-		algorithm = string(types.KeyTypeEd25519)
+		algorithm = string(types.EventInitiatorKeyTypeEd25519)
 	}
 
 	// Validate algorithm
 	if !slices.Contains(
-		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		[]string{string(types.EventInitiatorKeyTypeEd25519), string(types.EventInitiatorKeyTypeP256)},
 		algorithm,
 	) {
 		logger.Fatal(
 			fmt.Sprintf(
 				"invalid algorithm: %s. Must be %s or %s",
 				algorithm,
-				types.KeyTypeEd25519,
-				types.KeyTypeP256,
+				types.EventInitiatorKeyTypeEd25519,
+				types.EventInitiatorKeyTypeP256,
 			),
 			nil,
 		)
@@ -68,16 +68,6 @@ func main() {
 	if err != nil {
 		logger.Fatal("Failed to subscribe to OnResharingResult", err)
 	}
-	// Determine key type based on algorithm
-	var keyType types.KeyType
-	switch algorithm {
-	case string(types.KeyTypeEd25519):
-		keyType = types.KeyTypeEd25519
-	case string(types.KeyTypeP256):
-		keyType = types.KeyTypeP256
-	default:
-		logger.Fatal("Unsupported algorithm", nil)
-	}
 
 	resharingMsg := &types.ResharingMessage{
 		SessionID: uuid.NewString(),
@@ -88,7 +78,7 @@ func main() {
 		}, // new peer IDs
 
 		NewThreshold: 1, // t+1 <= len(NodeIDs)
-		KeyType:      keyType,
+		KeyType:      types.KeyTypeEd25519,
 	}
 	err = mpcClient.Resharing(resharingMsg)
 	if err != nil {

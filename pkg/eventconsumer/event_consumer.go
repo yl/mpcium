@@ -392,15 +392,6 @@ func (ec *eventConsumer) handleSigningEvent(natMsg *nats.Msg) {
 			ec.signingResultQueue,
 			idempotentKey,
 		)
-	case types.KeyTypeP256:
-		session, sessionErr = ec.node.CreateSigningSession(
-			mpc.SessionTypeECDSA,
-			msg.WalletID,
-			msg.TxID,
-			msg.NetworkInternalCode,
-			ec.signingResultQueue,
-			idempotentKey,
-		)
 	case types.KeyTypeEd25519:
 		session, sessionErr = ec.node.CreateSigningSession(
 			mpc.SessionTypeEDDSA,
@@ -879,8 +870,6 @@ func (ec *eventConsumer) Close() error {
 func sessionTypeFromKeyType(keyType types.KeyType) (mpc.SessionType, error) {
 	switch keyType {
 	case types.KeyTypeSecp256k1:
-		return mpc.SessionTypeECDSA, nil
-	case types.KeyTypeP256:
 		return mpc.SessionTypeECDSA, nil
 	case types.KeyTypeEd25519:
 		return mpc.SessionTypeEDDSA, nil

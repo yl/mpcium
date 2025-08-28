@@ -24,20 +24,20 @@ func main() {
 
 	algorithm := viper.GetString("event_initiator_algorithm")
 	if algorithm == "" {
-		algorithm = string(types.KeyTypeEd25519)
+		algorithm = string(types.EventInitiatorKeyTypeEd25519)
 	}
 
 	// Validate algorithm
 	if !slices.Contains(
-		[]string{string(types.KeyTypeEd25519), string(types.KeyTypeP256)},
+		[]string{string(types.EventInitiatorKeyTypeEd25519), string(types.EventInitiatorKeyTypeP256)},
 		algorithm,
 	) {
 		logger.Fatal(
 			fmt.Sprintf(
 				"invalid algorithm: %s. Must be %s or %s",
 				algorithm,
-				types.KeyTypeEd25519,
-				types.KeyTypeP256,
+				types.EventInitiatorKeyTypeEd25519,
+				types.EventInitiatorKeyTypeP256,
 			),
 			nil,
 		)
@@ -60,19 +60,8 @@ func main() {
 	txID := uuid.New().String()
 	dummyTx := []byte("deadbeef") // replace with real transaction bytes
 
-	// Determine key type based on algorithm
-	var keyType types.KeyType
-	switch algorithm {
-	case string(types.KeyTypeEd25519):
-		keyType = types.KeyTypeEd25519
-	case string(types.KeyTypeP256):
-		keyType = types.KeyTypeP256
-	default:
-		logger.Fatal("Unsupported algorithm", nil)
-	}
-
 	txMsg := &types.SignTxMessage{
-		KeyType:             keyType,
+		KeyType:             types.KeyTypeEd25519,
 		WalletID:            "ad24f678-b04b-4149-bcf6-bf9c90df8e63", // Use the generated wallet ID
 		NetworkInternalCode: "solana-devnet",
 		TxID:                txID,

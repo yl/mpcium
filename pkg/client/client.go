@@ -201,10 +201,8 @@ func NewMPCClient(opts Options) MPCClient {
 		genKeySuccessQueue:  genKeySuccessQueue,
 		signResultQueue:     signResultQueue,
 		reshareSuccessQueue: reshareSuccessQueue,
-		// privKey:             priv,
-		// privKeyECDSA:        privECDSA,
-		initiatorPrivKey: initiatorPrivKey,
-		algorithm: opts.Algorithm,
+		initiatorPrivKey:    initiatorPrivKey,
+		algorithm:           opts.Algorithm,
 	}
 }
 
