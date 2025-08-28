@@ -53,10 +53,16 @@ func main() {
 	defer natsConn.Drain()
 	defer natsConn.Close()
 
+	localSigner, err := client.NewLocalSigner(types.EventInitiatorKeyType(algorithm), client.LocalSignerOptions{
+		KeyPath: "./event_initiator.key",
+	})
+	if err != nil {
+		logger.Fatal("Failed to create local signer", err)
+	}
+
 	mpcClient := client.NewMPCClient(client.Options{
-		Algorithm: types.EventInitiatorKeyType(algorithm),
-		NatsConn:  natsConn,
-		KeyPath:   "./event_initiator.key",
+		NatsConn: natsConn,
+		Signer:   localSigner,
 	})
 
 	// 3) Listen for signing results

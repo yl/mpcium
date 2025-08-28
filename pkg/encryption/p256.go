@@ -174,3 +174,12 @@ func ValidateP256PublicKey(publicKey *ecdsa.PublicKey) error {
 	}
 	return nil
 }
+
+// MarshalP256PublicKey marshals a P256 public key to DER format
+func MarshalP256PublicKey(publicKey *ecdsa.PublicKey) ([]byte, error) {
+	if err := ValidateP256PublicKey(publicKey); err != nil {
+		return nil, fmt.Errorf("invalid P256 public key: %w", err)
+	}
+	
+	return x509.MarshalPKIXPublicKey(publicKey)
+}
