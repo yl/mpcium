@@ -2,9 +2,24 @@ package encryption
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 )
+
+// generateEd25519Keys generates Ed25519 keypair
+func GenerateEd25519Keys() (KeyData, error) {
+	pubKey, privKeyFull, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return KeyData{}, err
+	}
+
+	privKeySeed := privKeyFull.Seed()
+	return KeyData{
+		PublicKeyHex:  hex.EncodeToString(pubKey),
+		PrivateKeyHex: hex.EncodeToString(privKeySeed),
+	}, nil
+}
 
 // ParseEd25519PublicKeyFromHex parses a hex-encoded Ed25519 public key and validates it.
 // Returns the public key as []byte and an error if invalid.

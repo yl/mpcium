@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -91,7 +88,7 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	var err error
 
 	if algorithm == string(types.EventInitiatorKeyTypeEd25519) {
-		keyData, err = generateEd25519Keys()
+		keyData, err = encryption.GenerateEd25519Keys()
 	} else if algorithm == string(types.EventInitiatorKeyTypeP256) {
 		keyData, err = encryption.GenerateP256Keys()
 	}
@@ -192,18 +189,4 @@ func generateInitiatorIdentity(ctx context.Context, c *cli.Command) error {
 	fmt.Println("- Private Key:", keyPath)
 	fmt.Println("- Identity JSON:", identityPath)
 	return nil
-}
-
-// generateEd25519Keys generates Ed25519 keypair
-func generateEd25519Keys() (encryption.KeyData, error) {
-	pubKey, privKeyFull, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return encryption.KeyData{}, err
-	}
-
-	privKeySeed := privKeyFull.Seed()
-	return encryption.KeyData{
-		PublicKeyHex:  hex.EncodeToString(pubKey),
-		PrivateKeyHex: hex.EncodeToString(privKeySeed),
-	}, nil
 }

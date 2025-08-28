@@ -187,10 +187,10 @@ func loadInitiatorKeys() (*InitiatorKey, error) {
 			return nil, fmt.Errorf("failed to load Ed25519 initiator key: %w", err)
 		}
 		initiatorKey = &InitiatorKey{
-			Algorithm: "ed25519",
+			Algorithm: types.EventInitiatorKeyTypeEd25519,
 			Ed25519:   key,
 		}
-		logger.Infof("Loaded Ed25519 initiator public key")
+		logger.Info("Loaded Ed25519 initiator public key")
 
 	case string(types.EventInitiatorKeyTypeP256):
 		key, err := loadP256InitiatorKey()
@@ -198,13 +198,10 @@ func loadInitiatorKeys() (*InitiatorKey, error) {
 			return nil, fmt.Errorf("failed to load P-256 initiator key: %w", err)
 		}
 		initiatorKey = &InitiatorKey{
-			Algorithm: "p256",
+			Algorithm: types.EventInitiatorKeyTypeP256,
 			P256:      key,
 		}
-		logger.Infof(
-			"Loaded P-256 initiator public key from %s",
-			viper.GetString("event_initiator_pubkey"),
-		)
+		logger.Info("Loaded P-256 initiator public key")
 	}
 
 	return initiatorKey, nil
