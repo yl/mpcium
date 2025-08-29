@@ -2,16 +2,9 @@ package client
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"strings"
 
-	"filippo.io/age"
 	"github.com/fystack/mpcium/pkg/event"
 	"github.com/fystack/mpcium/pkg/eventconsumer"
 	"github.com/fystack/mpcium/pkg/logger"
@@ -43,7 +36,7 @@ type mpcClient struct {
 	genKeySuccessQueue  messaging.MessageQueue
 	signResultQueue     messaging.MessageQueue
 	reshareSuccessQueue messaging.MessageQueue
-	privKey             ed25519.PrivateKey
+	signer              Signer
 }
 
 // Options defines configuration options for creating a new MPCClient
@@ -51,81 +44,37 @@ type Options struct {
 	// NATS connection
 	NatsConn *nats.Conn
 
-	// Key path options
-	KeyPath string // Path to unencrypted key (default: "./event_initiator.key")
-
-	// Encryption options
-	Encrypted bool   // Whether the key is encrypted
-	Password  string // Password for encrypted key
+	// Signer for signing messages
+	Signer Signer
 }
 
 // NewMPCClient creates a new MPC client using the provided options.
-// It reads the Ed25519 private key from disk and sets up messaging connections.
-// If the key is encrypted (.age file), decryption options must be provided in the config.
+// The signer must be provided to handle message signing.
 func NewMPCClient(opts Options) MPCClient {
-	// Set default paths if not provided
-	if opts.KeyPath == "" {
-		opts.KeyPath = filepath.Join(".", "event_initiator.key")
+	if opts.Signer == nil {
+		logger.Fatal("Signer is required", nil)
 	}
-
-	if strings.HasSuffix(opts.KeyPath, ".age") {
-		opts.Encrypted = true
-	}
-
-	var privHexBytes []byte
-	var err error
-
-	// Check if key file exists
-	if _, err := os.Stat(opts.KeyPath); err == nil {
-		if opts.Encrypted {
-			// Encrypted key exists, try to decrypt it
-			if opts.Password == "" {
-				logger.Fatal("Encrypted key found but no decryption option provided", nil)
-			}
-
-			// Read encrypted file
-			encryptedBytes, err := os.ReadFile(opts.KeyPath)
-			if err != nil {
-				logger.Fatal("Failed to read encrypted private key file", err)
-			}
-
-			// Decrypt the key using the provided password
-			privHexBytes, err = decryptPrivateKey(encryptedBytes, opts.Password)
-			if err != nil {
-				logger.Fatal("Failed to decrypt private key", err)
-			}
-		} else {
-			// Unencrypted key exists, read it normally
-			privHexBytes, err = os.ReadFile(opts.KeyPath)
-			if err != nil {
-				logger.Fatal("Failed to read private key file", err)
-			}
-		}
-	} else {
-		logger.Fatal("No private key file found", nil)
-	}
-
-	privHex := string(privHexBytes)
-	// Decode private key from hex
-	privSeed, err := hex.DecodeString(privHex)
-	if err != nil {
-		fmt.Println("Failed to decode private key hex:", err)
-		os.Exit(1)
-	}
-
-	// Reconstruct full Ed25519 private key from seed
-	priv := ed25519.NewKeyFromSeed(privSeed)
 
 	// 2) Create the PubSub for both publish & subscribe
-	signingBroker, err := messaging.NewJetStreamBroker(context.Background(), opts.NatsConn, "mpc-signing", []string{
-		"mpc.signing_request.*",
-	})
+	signingBroker, err := messaging.NewJetStreamBroker(
+		context.Background(),
+		opts.NatsConn,
+		"mpc-signing",
+		[]string{
+			"mpc.signing_request.*",
+		},
+	)
 	if err != nil {
 		logger.Fatal("Failed to create signing jetstream broker", err)
 	}
-	keygenBroker, err := messaging.NewJetStreamBroker(context.Background(), opts.NatsConn, "mpc-keygen", []string{
-		"mpc.keygen_request.*",
-	})
+	keygenBroker, err := messaging.NewJetStreamBroker(
+		context.Background(),
+		opts.NatsConn,
+		"mpc-keygen",
+		[]string{
+			"mpc.keygen_request.*",
+		},
+	)
 	if err != nil {
 		logger.Fatal("Failed to create keygen jetstream broker", err)
 	}
@@ -149,31 +98,8 @@ func NewMPCClient(opts Options) MPCClient {
 		genKeySuccessQueue:  genKeySuccessQueue,
 		signResultQueue:     signResultQueue,
 		reshareSuccessQueue: reshareSuccessQueue,
-		privKey:             priv,
+		signer:              opts.Signer,
 	}
-}
-
-// decryptPrivateKey decrypts the encrypted private key using the provided password
-func decryptPrivateKey(encryptedData []byte, password string) ([]byte, error) {
-	// Create an age identity (decryption key) from the password
-	identity, err := age.NewScryptIdentity(password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create identity from password: %w", err)
-	}
-
-	// Create a reader from the encrypted data
-	decrypter, err := age.Decrypt(strings.NewReader(string(encryptedData)), identity)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create decrypter: %w", err)
-	}
-
-	// Read the decrypted data
-	decryptedData, err := io.ReadAll(decrypter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read decrypted data: %w", err)
-	}
-
-	return decryptedData, nil
 }
 
 // CreateWallet generates a GenerateKeyMessage, signs it, and publishes it.
@@ -187,8 +113,11 @@ func (c *mpcClient) CreateWallet(walletID string) error {
 	if err != nil {
 		return fmt.Errorf("CreateWallet: raw payload error: %w", err)
 	}
-	// sign
-	msg.Signature = ed25519.Sign(c.privKey, raw)
+	signature, err := c.signer.Sign(raw)
+	if err != nil {
+		return fmt.Errorf("CreateWallet: failed to sign message: %w", err)
+	}
+	msg.Signature = signature
 
 	bytes, err := json.Marshal(msg)
 	if err != nil {
@@ -227,8 +156,11 @@ func (c *mpcClient) SignTransaction(msg *types.SignTxMessage) error {
 	if err != nil {
 		return fmt.Errorf("SignTransaction: raw payload error: %w", err)
 	}
-	// sign
-	msg.Signature = ed25519.Sign(c.privKey, raw)
+	signature, err := c.signer.Sign(raw)
+	if err != nil {
+		return fmt.Errorf("SignTransaction: failed to sign message: %w", err)
+	}
+	msg.Signature = signature
 
 	bytes, err := json.Marshal(msg)
 	if err != nil {
@@ -265,8 +197,11 @@ func (c *mpcClient) Resharing(msg *types.ResharingMessage) error {
 	if err != nil {
 		return fmt.Errorf("Resharing: raw payload error: %w", err)
 	}
-	// sign
-	msg.Signature = ed25519.Sign(c.privKey, raw)
+	signature, err := c.signer.Sign(raw)
+	if err != nil {
+		return fmt.Errorf("Resharing: failed to sign message: %w", err)
+	}
+	msg.Signature = signature
 
 	bytes, err := json.Marshal(msg)
 	if err != nil {

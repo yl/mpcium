@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/fystack/mpcium/pkg/client"
@@ -21,6 +22,29 @@ func main() {
 	config.InitViperConfig()
 	logger.Init(environment, true)
 
+	algorithm := viper.GetString("event_initiator_algorithm")
+	if algorithm == "" {
+		algorithm = string(types.EventInitiatorKeyTypeEd25519)
+	}
+
+	// Validate algorithm
+	if !slices.Contains(
+		[]string{
+			string(types.EventInitiatorKeyTypeEd25519),
+			string(types.EventInitiatorKeyTypeP256),
+		},
+		algorithm,
+	) {
+		logger.Fatal(
+			fmt.Sprintf(
+				"invalid algorithm: %s. Must be %s or %s",
+				algorithm,
+				types.EventInitiatorKeyTypeEd25519,
+				types.EventInitiatorKeyTypeP256,
+			),
+			nil,
+		)
+	}
 	natsURL := viper.GetString("nats.url")
 	natsConn, err := nats.Connect(natsURL)
 	if err != nil {
@@ -29,9 +53,16 @@ func main() {
 	defer natsConn.Drain()
 	defer natsConn.Close()
 
+	localSigner, err := client.NewLocalSigner(types.EventInitiatorKeyType(algorithm), client.LocalSignerOptions{
+		KeyPath: "./event_initiator.key",
+	})
+	if err != nil {
+		logger.Fatal("Failed to create local signer", err)
+	}
+
 	mpcClient := client.NewMPCClient(client.Options{
 		NatsConn: natsConn,
-		KeyPath:  "./event_initiator.key",
+		Signer:   localSigner,
 	})
 
 	// 2) Once wallet exists, immediately fire a SignTransaction
@@ -40,7 +71,7 @@ func main() {
 
 	txMsg := &types.SignTxMessage{
 		KeyType:             types.KeyTypeEd25519,
-		WalletID:            "c47cd6f4-8ef4-4d77-9d2b-37f9d062e615",
+		WalletID:            "ad24f678-b04b-4149-bcf6-bf9c90df8e63", // Use the generated wallet ID
 		NetworkInternalCode: "solana-devnet",
 		TxID:                txID,
 		Tx:                  dummyTx,

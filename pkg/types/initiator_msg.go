@@ -9,6 +9,13 @@ const (
 	KeyTypeEd25519   KeyType = "ed25519"
 )
 
+type EventInitiatorKeyType string
+
+const (
+	EventInitiatorKeyTypeEd25519 EventInitiatorKeyType = "ed25519"
+	EventInitiatorKeyTypeP256    EventInitiatorKeyType = "p256"
+)
+
 // InitiatorMessage is anything that carries a payload to verify and its signature.
 type InitiatorMessage interface {
 	// Raw returns the canonical byte‐slice that was signed.

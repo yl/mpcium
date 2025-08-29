@@ -18,6 +18,7 @@ import (
 	"github.com/fystack/mpcium/pkg/client"
 	"github.com/fystack/mpcium/pkg/event"
 	"github.com/fystack/mpcium/pkg/kvstore"
+	"github.com/fystack/mpcium/pkg/types"
 	"github.com/hashicorp/consul/api"
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
@@ -184,9 +185,17 @@ func (s *E2ETestSuite) SetupMPCClient(t *testing.T) {
 		t.Fatalf("Key file does not exist: %s. Make sure setupTestNodes ran successfully.", keyPath)
 	}
 
+	// Create local signer for Ed25519 (default for E2E tests)
+	localSigner, err := client.NewLocalSigner(types.EventInitiatorKeyTypeEd25519, client.LocalSignerOptions{
+		KeyPath: keyPath,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create local signer: %v", err)
+	}
+
 	mpcClient := client.NewMPCClient(client.Options{
 		NatsConn: s.natsConn,
-		KeyPath:  keyPath,
+		Signer:   localSigner,
 	})
 	s.mpcClient = mpcClient
 	t.Log("MPC client created")

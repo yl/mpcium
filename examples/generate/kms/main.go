@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,6 +23,9 @@ import (
 
 func main() {
 	const environment = "development"
+	const awsRegion = "ap-southeast-1"
+	const kmsKeyID = "48e76117-fd08-4dc0-bd10-b1c7d01de748"
+
 	numWallets := flag.Int("n", 1, "Number of wallets to generate")
 
 	flag.Parse()
@@ -31,28 +33,7 @@ func main() {
 	config.InitViperConfig()
 	logger.Init(environment, false)
 
-	algorithm := viper.GetString("event_initiator_algorithm")
-	if algorithm == "" {
-		algorithm = string(types.EventInitiatorKeyTypeEd25519)
-	}
-
-	if !slices.Contains(
-		[]string{
-			string(types.EventInitiatorKeyTypeEd25519),
-			string(types.EventInitiatorKeyTypeP256),
-		},
-		algorithm,
-	) {
-		logger.Fatal(
-			fmt.Sprintf(
-				"invalid algorithm: %s. Must be %s or %s",
-				algorithm,
-				types.EventInitiatorKeyTypeEd25519,
-				types.EventInitiatorKeyTypeP256,
-			),
-			nil,
-		)
-	}
+	// KMS signer only supports P256
 
 	natsURL := viper.GetString("nats.url")
 	natsConn, err := nats.Connect(natsURL)
@@ -62,16 +43,28 @@ func main() {
 	defer natsConn.Drain()
 	defer natsConn.Close()
 
-	localSigner, err := client.NewLocalSigner(types.EventInitiatorKeyType(algorithm), client.LocalSignerOptions{
-		KeyPath: "./event_initiator.key",
+	// For AWS production, use:
+	kmsSigner, err := client.NewKMSSigner(types.EventInitiatorKeyTypeP256, client.KMSSignerOptions{
+		Region:          awsRegion,
+		KeyID:           kmsKeyID,
+		EndpointURL:     "http://localhost:4566", // LocalStack endpoint
+		AccessKeyID:     "test",                  // LocalStack dummy credentials
+		SecretAccessKey: "test",                  // LocalStack dummy credentials
 	})
 	if err != nil {
-		logger.Fatal("Failed to create local signer", err)
+		logger.Fatal("Failed to create KMS signer", err)
 	}
+
+	// Log the public key for verification
+	pubKey, err := kmsSigner.PublicKey()
+	if err != nil {
+		logger.Fatal("Failed to get public key from KMS signer", err)
+	}
+	logger.Info("Public key", "key", pubKey)
 
 	mpcClient := client.NewMPCClient(client.Options{
 		NatsConn: natsConn,
-		Signer:   localSigner,
+		Signer:   kmsSigner,
 	})
 
 	var walletStartTimes sync.Map
@@ -139,11 +132,13 @@ func main() {
 		wg.Wait()
 		totalDuration := time.Since(startAll).Seconds()
 		logger.Info(
-			"All wallets generated",
+			"All wallets generated using KMS signer",
 			"count",
 			completedCount,
 			"total_duration_seconds",
 			fmt.Sprintf("%.3f", totalDuration),
+			"kms_key_id",
+			kmsKeyID,
 		)
 
 		// Save wallet IDs to wallets.json

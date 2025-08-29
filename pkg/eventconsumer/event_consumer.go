@@ -401,7 +401,8 @@ func (ec *eventConsumer) handleSigningEvent(natMsg *nats.Msg) {
 			ec.signingResultQueue,
 			idempotentKey,
 		)
-
+	default:
+		sessionErr = fmt.Errorf("unsupported key type: %v", msg.KeyType)
 	}
 	if sessionErr != nil {
 		if errors.Is(sessionErr, mpc.ErrNotEnoughParticipants) {
