@@ -18,14 +18,15 @@ type ConsulKV interface {
 
 func GetConsulClient(environment string) *api.Client {
 	config := api.DefaultConfig()
-	if environment != constant.EnvProduction {
-		config.Scheme = "http"
-	} else {
-		config.Scheme = "https"
+	if environment == constant.EnvProduction {
 		config.Token = viper.GetString("consul.token")
-		config.HttpAuth = &api.HttpBasicAuth{
-			Username: viper.GetString("consul.username"),
-			Password: viper.GetString("consul.password"),
+		username := viper.GetString("consul.username")
+		password := viper.GetString("consul.password")
+		if username != "" || password != "" {
+			config.HttpAuth = &api.HttpBasicAuth{
+				Username: username,
+				Password: password,
+			}
 		}
 	}
 

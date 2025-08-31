@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/fystack/mpcium/pkg/logger"
 	"github.com/fystack/mpcium/pkg/messaging"
 	"github.com/fystack/mpcium/pkg/mpc"
+	"github.com/fystack/mpcium/pkg/security"
 	"github.com/hashicorp/consul/api"
 	"github.com/nats-io/nats.go"
 	"github.com/spf13/viper"
@@ -49,6 +51,11 @@ func main() {
 						Usage:    "Node name",
 						Required: true,
 					},
+					&cli.StringFlag{
+						Name:    "config",
+						Aliases: []string{"c"},
+						Usage:   "Path to configuration file",
+					},
 					&cli.BoolFlag{
 						Name:    "decrypt-private-key",
 						Aliases: []string{"d"},
@@ -59,6 +66,16 @@ func main() {
 						Name:    "prompt-credentials",
 						Aliases: []string{"p"},
 						Usage:   "Prompt for sensitive parameters",
+					},
+					&cli.StringFlag{
+						Name:    "password-file",
+						Aliases: []string{"f"},
+						Usage:   "Path to file containing BadgerDB password",
+					},
+					&cli.StringFlag{
+						Name:    "age-password-file",
+						Aliases: []string{"k"},
+						Usage:   "Path to file containing password for decrypting .age encrypted node private key",
 					},
 					&cli.BoolFlag{
 						Name:  "debug",
@@ -87,15 +104,24 @@ func main() {
 
 func runNode(ctx context.Context, c *cli.Command) error {
 	nodeName := c.String("name")
+	configPath := c.String("config")
 	decryptPrivateKey := c.Bool("decrypt-private-key")
 	usePrompts := c.Bool("prompt-credentials")
+	passwordFile := c.String("password-file")
+	agePasswordFile := c.String("age-password-file")
 	debug := c.Bool("debug")
 
 	viper.SetDefault("backup_enabled", true)
-	config.InitViperConfig()
+	config.InitViperConfig(configPath)
 	environment := viper.GetString("environment")
 	logger.Init(environment, debug)
 
+	// Handle password file if provided
+	if passwordFile != "" {
+		if err := loadPasswordFromFile(passwordFile); err != nil {
+			return fmt.Errorf("failed to load password from file: %w", err)
+		}
+	}
 	// Handle configuration based on prompt flag
 	if usePrompts {
 		promptForSensitiveCredentials()
@@ -120,7 +146,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 		defer stopBackup()
 	}
 
-	identityStore, err := identity.NewFileStore("identity", nodeName, decryptPrivateKey)
+	identityStore, err := identity.NewFileStore("identity", nodeName, decryptPrivateKey, agePasswordFile)
 	if err != nil {
 		logger.Fatal("Failed to create identity store", err)
 	}
@@ -272,6 +298,30 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
+// loadPasswordFromFile reads the BadgerDB password from a file
+func loadPasswordFromFile(filePath string) error {
+	passwordBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read password file %s: %w", filePath, err)
+	}
+
+	// Trim whitespace/newlines without altering content
+	password := strings.TrimSpace(string(passwordBytes))
+
+	if password == "" {
+		security.ZeroBytes(passwordBytes)
+		return fmt.Errorf("password file %s is empty", filePath)
+	}
+
+	viper.Set("badger_password", password)
+	logger.Info(fmt.Sprintf("Loaded BadgerDB password from file: %s", filePath), "password", password)
+
+	security.ZeroBytes(passwordBytes)
+	security.ZeroString(&password)
+
+	return nil
+}
+
 // Prompt user for sensitive configuration values
 func promptForSensitiveCredentials() {
 	fmt.Println("WARNING: Please back up your Badger DB password in a secure location.")
@@ -281,6 +331,12 @@ func promptForSensitiveCredentials() {
 	var badgerPass []byte
 	var confirmPass []byte
 	var err error
+
+	// Ensure sensitive buffers are zeroed on exit
+	defer func() {
+		security.ZeroBytes(badgerPass)
+		security.ZeroBytes(confirmPass)
+	}()
 
 	for {
 		fmt.Print("Enter Badger DB password: ")
@@ -311,28 +367,11 @@ func promptForSensitiveCredentials() {
 	}
 
 	// Show masked password for confirmation
-	maskedPassword := maskString(string(badgerPass))
+	passwordStr := string(badgerPass)
+	maskedPassword := maskString(passwordStr)
 	fmt.Printf("Password set: %s\n", maskedPassword)
-
-	viper.Set("badger_password", string(badgerPass))
-
-	// Prompt for initiator public key (using regular input since it's not as sensitive)
-	var initiatorKey string
-	fmt.Print("Enter event initiator public key (hex): ")
-	if _, err := fmt.Scanln(&initiatorKey); err != nil {
-		logger.Fatal("Failed to read initiator key", err)
-	}
-
-	if initiatorKey == "" {
-		logger.Fatal("Initiator public key cannot be empty", nil)
-	}
-
-	// Show masked key for confirmation
-	maskedKey := maskString(initiatorKey)
-	fmt.Printf("Event initiator public key set: %s\n", maskedKey)
-
-	viper.Set("event_initiator_pubkey", initiatorKey)
-	fmt.Println("\n✓ Configuration complete!")
+	viper.Set("badger_password", passwordStr)
+	security.ZeroString(&passwordStr)
 }
 
 // maskString shows the first and last character of a string, replacing the middle with asterisks
@@ -479,9 +518,21 @@ func GetNATSConnection(environment string) (*nats.Conn, error) {
 	}
 
 	if environment == constant.EnvProduction {
-		clientCert := filepath.Join(".", "certs", "client-cert.pem")
-		clientKey := filepath.Join(".", "certs", "client-key.pem")
-		caCert := filepath.Join(".", "certs", "rootCA.pem")
+		// Load TLS config from configuration
+		clientCert := viper.GetString("nats.tls.client_cert")
+		clientKey := viper.GetString("nats.tls.client_key")
+		caCert := viper.GetString("nats.tls.ca_cert")
+
+		// Fallback to default paths if not configured
+		if clientCert == "" {
+			clientCert = filepath.Join(".", "certs", "client-cert.pem")
+		}
+		if clientKey == "" {
+			clientKey = filepath.Join(".", "certs", "client-key.pem")
+		}
+		if caCert == "" {
+			caCert = filepath.Join(".", "certs", "rootCA.pem")
+		}
 
 		opts = append(opts,
 			nats.ClientCert(clientCert, clientKey),

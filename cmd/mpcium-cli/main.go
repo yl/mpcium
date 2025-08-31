@@ -18,6 +18,13 @@ func main() {
 	cmd := &cli.Command{
 		Name:  "mpcium",
 		Usage: "Fystack MPC node management tools",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    "config",
+				Aliases: []string{"c"},
+				Usage:   "Path to configuration file",
+			},
+		},
 		Commands: []*cli.Command{
 			{
 				Name:   "generate-peers",

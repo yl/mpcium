@@ -21,6 +21,7 @@ import (
 	"github.com/fystack/mpcium/pkg/common/pathutil"
 	"github.com/fystack/mpcium/pkg/encryption"
 	"github.com/fystack/mpcium/pkg/logger"
+	"github.com/fystack/mpcium/pkg/security"
 	"github.com/fystack/mpcium/pkg/types"
 	"github.com/spf13/viper"
 )
@@ -75,12 +76,12 @@ type fileStore struct {
 }
 
 // NewFileStore creates a new identity store
-func NewFileStore(identityDir, nodeName string, decrypt bool) (*fileStore, error) {
+func NewFileStore(identityDir, nodeName string, decrypt bool, agePasswordFile string) (*fileStore, error) {
 	if err := os.MkdirAll(identityDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create identity directory: %w", err)
 	}
 
-	privateKeyHex, err := loadPrivateKey(identityDir, nodeName, decrypt)
+	privateKeyHex, err := loadPrivateKey(identityDir, nodeName, decrypt, agePasswordFile)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +250,7 @@ func loadP256InitiatorKey() (*ecdsa.PublicKey, error) {
 }
 
 // loadPrivateKey loads the private key from file, decrypting if necessary
-func loadPrivateKey(identityDir, nodeName string, decrypt bool) (string, error) {
+func loadPrivateKey(identityDir, nodeName string, decrypt bool, agePasswordFile string) (string, error) {
 	// Check for encrypted or unencrypted private key
 	encryptedKeyFileName := fmt.Sprintf("%s_private.key.age", nodeName)
 	unencryptedKeyFileName := fmt.Sprintf("%s_private.key", nodeName)
@@ -279,15 +280,29 @@ func loadPrivateKey(identityDir, nodeName string, decrypt bool) (string, error) 
 		}
 		defer encryptedFile.Close()
 
-		// Prompt for passphrase using term.ReadPassword
-		fmt.Print("Enter passphrase to decrypt private key: ")
-		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-		fmt.Println() // newline after prompt
-		if err != nil {
-			return "", fmt.Errorf("failed to read passphrase: %w", err)
+		var passphrase string
+		if agePasswordFile != "" {
+			// Load passphrase from file
+			data, err := os.ReadFile(agePasswordFile)
+			if err != nil {
+				return "", fmt.Errorf("failed to read age key file %s: %w", agePasswordFile, err)
+			}
+			passphrase = strings.TrimSpace(string(data)) // trim newline if present
+			security.ZeroBytes(data)
+			logger.Infof("Using passphrase from from file: %s to decrypt node private key", agePasswordFile)
+		} else {
+			// Prompt for passphrase from terminal
+			fmt.Print("Enter passphrase to decrypt private key: ")
+			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+			fmt.Println() // newline after prompt
+			if err != nil {
+				return "", fmt.Errorf("failed to read passphrase: %w", err)
+			}
+			passphrase = string(bytePassword)
+			security.ZeroBytes(bytePassword)
 		}
-		passphrase := string(bytePassword)
-		// Create an identity with the provided passphrase
+
+		// Create the identity once, regardless of source
 		identity, err := age.NewScryptIdentity(passphrase)
 		if err != nil {
 			return "", fmt.Errorf("failed to create identity for decryption: %w", err)
@@ -305,6 +320,7 @@ func loadPrivateKey(identityDir, nodeName string, decrypt bool) (string, error) 
 			return "", fmt.Errorf("failed to read decrypted key: %w", err)
 		}
 
+		security.ZeroString(&passphrase)
 		return string(decryptedData), nil
 	} else {
 		// Use the unencrypted private key file

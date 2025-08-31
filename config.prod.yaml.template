@@ -2,9 +2,13 @@ nats:
   url: tls://127.0.0.1:4222 # Please use TLS for production
   username: ""
   password: ""
+  tls:
+   client_cert: "/etc/mpcium/certs/client-cert.pem"
+   client_key: "/etc/mpcium/certs/client-key.pem"
+   ca_cert: "/etc/mpcium/certs/rootCA.pem"
 
 consul:
-  address: https://consul.example.com # Use HTTPS for production
+  address: https://consul.example.com
   username: username
   token: ""
   password: ""

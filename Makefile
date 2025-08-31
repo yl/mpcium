@@ -1,4 +1,4 @@
-.PHONY: all build clean mpcium mpc test test-verbose test-coverage e2e-test e2e-clean cleanup-test-env
+.PHONY: all build clean mpcium mpc install test test-verbose test-coverage e2e-test e2e-clean cleanup-test-env
 
 BIN_DIR := bin
 
@@ -15,6 +15,16 @@ mpcium:
 # Install mpcium-cli
 mpc:
 	go install ./cmd/mpcium-cli
+
+# Install binaries to /usr/local/bin (auto-detects architecture)
+install:
+	@echo "Building and installing mpcium binaries for Linux..."
+	GOOS=linux go build -o /tmp/mpcium ./cmd/mpcium
+	GOOS=linux go build -o /tmp/mpcium-cli ./cmd/mpcium-cli
+	sudo install -m 755 /tmp/mpcium /usr/local/bin/
+	sudo install -m 755 /tmp/mpcium-cli /usr/local/bin/
+	rm -f /tmp/mpcium /tmp/mpcium-cli
+	@echo "Successfully installed mpcium and mpcium-cli to /usr/local/bin/"
 
 # Run all tests
 test:

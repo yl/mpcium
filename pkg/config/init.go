@@ -40,15 +40,31 @@ type ConsulConfig struct {
 }
 
 type NATsConfig struct {
-	URL      string `mapstructure:"url"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
+	URL      string     `mapstructure:"url"`
+	Username string     `mapstructure:"username"`
+	Password string     `mapstructure:"password"`
+	TLS      *TLSConfig `mapstructure:"tls"`
 }
 
-func InitViperConfig() {
-	viper.SetConfigName("config") // name of config file (without extension)
-	viper.SetConfigType("yaml")   // REQUIRED if the config file does not have the extension in the name
-	viper.AddConfigPath(".")      // optionally look for config in the working directory
+type TLSConfig struct {
+	ClientCert string `mapstructure:"client_cert"`
+	ClientKey  string `mapstructure:"client_key"`
+	CACert     string `mapstructure:"ca_cert"`
+}
+
+func InitViperConfig(configPath string) {
+	if configPath != "" {
+		// Use specific config file path
+		viper.SetConfigFile(configPath)
+	} else {
+		// Use default behavior - search for config.yaml in common locations
+		viper.SetConfigName("config") // name of config file (without extension)
+		viper.SetConfigType("yaml")   // REQUIRED if the config file does not have the extension in the name
+		viper.AddConfigPath(".")      // optionally look for config in the working directory
+		viper.AddConfigPath("/etc/mpcium/") // look for config in /etc/mpcium/
+		viper.AddConfigPath("$HOME/.mpcium/") // look for config in home directory
+	}
+	
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 	err := viper.ReadInConfig() // Find and read the config file
