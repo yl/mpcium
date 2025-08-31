@@ -314,8 +314,6 @@ func loadPasswordFromFile(filePath string) error {
 	}
 
 	viper.Set("badger_password", password)
-	logger.Info(fmt.Sprintf("Loaded BadgerDB password from file: %s", filePath), "password", password)
-
 	security.ZeroBytes(passwordBytes)
 	security.ZeroString(&password)
 
