@@ -73,7 +73,7 @@ func main() {
 						Usage:   "Path to file containing BadgerDB password",
 					},
 					&cli.StringFlag{
-						Name:    "age-password-file",
+						Name:    "identity-password-file",
 						Aliases: []string{"k"},
 						Usage:   "Path to file containing password for decrypting .age encrypted node private key",
 					},
@@ -108,7 +108,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	decryptPrivateKey := c.Bool("decrypt-private-key")
 	usePrompts := c.Bool("prompt-credentials")
 	passwordFile := c.String("password-file")
-	agePasswordFile := c.String("age-password-file")
+	agePasswordFile := c.String("identity-password-file")
 	debug := c.Bool("debug")
 
 	viper.SetDefault("backup_enabled", true)
