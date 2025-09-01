@@ -484,7 +484,7 @@ func (s *fileStore) VerifySignature(msg *types.ECDHMessage) error {
 
 	// Verify the signature
 	if !ed25519.Verify(senderPk, msgBytes, msg.Signature) {
-		return fmt.Errorf("invalid signature")
+		return fmt.Errorf("invalid signature from %s with public key %s", msg.From, hex.EncodeToString(senderPk))
 	}
 
 	return nil
