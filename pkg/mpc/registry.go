@@ -159,9 +159,9 @@ func (r *registry) Ready() error {
 	}
 
 	_, err = r.healthCheck.Listen(r.composeHealthCheckTopic(r.nodeID), func(data []byte) {
-		peerID, ecdhReadyPeersCount, _ := parseHealthDataSplit(string(data))
+		peerID, isEcdhReady, _ := parseHealthDataSplit(string(data))
 		logger.Debug("Health check ok", "peerID", peerID)
-		if ecdhReadyPeersCount < int(r.GetReadyPeersCountExcludeSelf()) {
+		if !isEcdhReady {
 			logger.Info("[ECDH exchange retriggerd] not all peers are ready", "peerID", peerID)
 			go r.triggerECDHExchange()
 
@@ -356,20 +356,20 @@ func (r *registry) composeHealthCheckTopic(nodeID string) string {
 }
 
 func (r *registry) composeHealthData() string {
-	return fmt.Sprintf("%s,%d", r.nodeID, r.ecdhSession.GetReadyPeersCount())
+	isECDHReady := r.isECDHReady()
+	return fmt.Sprintf("%s,%t", r.nodeID, isECDHReady)
 }
 
-func parseHealthDataSplit(s string) (peerID string, readyCount int, err error) {
+func parseHealthDataSplit(s string) (peerID string, ready bool, err error) {
 	parts := strings.SplitN(s, ",", 2)
 	if len(parts) != 2 {
-		return "", 0, fmt.Errorf("invalid format: %q", s)
+		return "", false, fmt.Errorf("invalid format: %q", s)
 	}
 
 	peerID = parts[0]
-	readyCount, err = strconv.Atoi(parts[1])
+	ready, err = strconv.ParseBool(parts[1]) // accepts "true"/"false", "1"/"0", "t"/"f"
 	if err != nil {
-		return "", 0, err
+		return "", false, err
 	}
-	return peerID, readyCount, nil
-
+	return peerID, ready, nil
 }
