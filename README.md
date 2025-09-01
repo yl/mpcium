@@ -133,9 +133,10 @@ The application uses a YAML configuration file (`config.yaml`) with the followin
 - `event_initiator_pubkey`: Public key of the event initiator
 - `max_concurrent_keygen`: Maximum concurrent key generation operations
 
-## Installation and Run
+## Installation
 
-For full installation and run instructions, see [INSTALLATION.md](./INSTALLATION.md).
+- **Local Development**: For quick setup and testing, see [INSTALLATION.md](./INSTALLATION.md)
+- **Production Deployment**: For secure production deployment with systemd, see [deployments/systemd/README.md](./deployments/systemd/README.md)
 
 ## Preview usage
 

@@ -1,10 +1,14 @@
-# Mpcium Deployment Guide
+# Mpcium Production Deployment Guide
 
-This directory contains deployment scripts and configurations for Mpcium MPC (Multi-Party Computation) nodes.
+⚠️ **PRODUCTION DEPLOYMENT ONLY**
+
+This directory contains deployment scripts and configurations for **production deployment** of Mpcium MPC (Multi-Party Computation) nodes using systemd.
+
+**For local development and testing**, please refer to [INSTALLATION.md](../../INSTALLATION.md) instead.
 
 ## Overview
 
-Mpcium is a distributed threshold cryptographic system that requires multiple nodes to collaborate for secure operations. This deployment guide covers setting up a production-ready MPC cluster.
+Mpcium is a distributed threshold cryptographic system that requires multiple nodes to collaborate for secure operations. This deployment guide covers setting up a **secure, production-ready** MPC cluster with proper security hardening, systemd integration, and operational best practices.
 
 ## Quick Start (Recommended)
 
