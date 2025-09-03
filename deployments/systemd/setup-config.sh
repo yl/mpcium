@@ -109,37 +109,28 @@ check_root() {
     fi
 }
 
-# Prompt for environment selection
-setup_environment() {
-    log_step "Setting up environment..."
+# Get environment from config.yaml
+get_environment_from_config() {
+    log_step "Reading environment from config.yaml..."
     
-    local environment=""
-    echo -e "${BLUE}[PROMPT]${NC} Select environment:"
-    echo -e "  ${YELLOW}1) development${NC} - For testing and development"
-    echo -e "  ${YELLOW}2) production${NC}  - For production deployment with full security"
+    local config_file="/etc/mpcium/config.yaml"
     
-    while true; do
-        read -p "> Enter choice (1 or 2): " choice
-        echo
-        
-        case "$choice" in
-            1)
-                environment="development"
-                break
-                ;;
-            2)
-                environment="production"
-                break
-                ;;
-            *)
-                log_error "Invalid choice. Please enter 1 for development or 2 for production."
-                ;;
-        esac
-    done
+    if [[ ! -f "$config_file" ]]; then
+        log_error "Config file not found at $config_file"
+        exit 1
+    fi
+    
+    # Extract environment from config.yaml
+    local environment=$(grep "^environment:" "$config_file" | sed 's/environment: *//g' | sed 's/"//g' | sed "s/'//g")
+    
+    if [[ -z "$environment" ]]; then
+        environment="production" # default
+        log_warn "Environment not specified in config.yaml, defaulting to production"
+    fi
     
     # Store the environment for later use
     MPCIUM_ENVIRONMENT="$environment"
-    log_info "Environment set to: $MPCIUM_ENVIRONMENT"
+    log_info "Environment from config.yaml: $MPCIUM_ENVIRONMENT"
 }
 
 # Prompt for MPCIUM_NODE_NAME if not provided
@@ -426,62 +417,128 @@ check_environment() {
     fi
 }
 
-# Check config.yaml for missing credentials and prompt if needed
-check_and_update_config_credentials() {
-    log_step "Checking configuration credentials..."
+# Validate config.yaml has all required credentials
+validate_config_credentials() {
+    log_step "Validating configuration credentials..."
     
-    local config_file="/etc/mpcium/config.yaml"
-    local updated=false
+    local config_file="${1:-/etc/mpcium/config.yaml}"
+    local errors=0
     
     if [[ ! -f "$config_file" ]]; then
         log_error "Config file not found at $config_file - the configuration file doesn't exist yet"
         return 1
     fi
     
-    # Initialize flags to track which credentials were collected
-    COLLECT_NATS_PASSWORD=false
-    COLLECT_CONSUL_PASSWORD=false
-    COLLECT_CONSUL_TOKEN=false
+    log_info "Validating config file: $config_file"
     
-    # Check for missing nats.password - if missing or empty, prompt for .env
-    if ! grep -A 10 "^nats:" "$config_file" | grep -q "password:" || grep -A 10 "^nats:" "$config_file" | grep -q "password: *$" || grep -A 10 "^nats:" "$config_file" | grep -q 'password: ""'; then
-        log_info "NATS password not configured - collecting for .env file"
-        local nats_password
-        prompt_secret_optional "NATS password" "nats_password"
-        NATS_PASSWORD="$nats_password"
-        COLLECT_NATS_PASSWORD=true
+    # Note: badger_password is provided via systemd credentials, not config.yaml
+    log_info "[i] badger_password will be provided via systemd credentials"
+    
+    # Check for required event_initiator_pubkey
+    if ! grep -q "^event_initiator_pubkey:" "$config_file" || grep -q "^event_initiator_pubkey: *$" "$config_file" || grep -q '^event_initiator_pubkey: ""' "$config_file"; then
+        log_error "❌ event_initiator_pubkey not configured in config.yaml"
+        ((errors++))
     else
-        log_info "NATS password already configured in config.yaml - skipping"
+        log_info "✓ event_initiator_pubkey configured"
     fi
     
-    # Check for missing consul.password - if missing or empty, prompt for .env
-    if ! grep -A 10 "^consul:" "$config_file" | grep -q "password:" || grep -A 10 "^consul:" "$config_file" | grep -q "password: *$" || grep -A 10 "^consul:" "$config_file" | grep -q 'password: ""'; then
-        log_info "Consul password not configured - collecting for .env file"
-        local consul_password
-        prompt_secret_optional "Consul password" "consul_password"
-        CONSUL_PASSWORD="$consul_password"
-        COLLECT_CONSUL_PASSWORD=true
+    # Check for NATS configuration
+    local nats_url=$(grep -A 10 "^nats:" "$config_file" | grep "url:" | sed 's/.*url: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+    if [[ -z "$nats_url" ]]; then
+        log_error "❌ nats.url not configured in config.yaml"
+        ((errors++))
     else
-        log_info "Consul password already configured in config.yaml - skipping"
+        log_info "✓ nats.url configured: $nats_url"
+        
+        # If NATS URL uses TLS, validate TLS certificate configuration
+        if [[ "$nats_url" =~ ^tls:// ]]; then
+            log_info "[TLS] TLS URL detected, validating certificate configuration..."
+            
+            local client_cert=$(grep -A 20 "^nats:" "$config_file" | grep -A 10 "tls:" | grep "client_cert:" | sed 's/.*client_cert: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+            local client_key=$(grep -A 20 "^nats:" "$config_file" | grep -A 10 "tls:" | grep "client_key:" | sed 's/.*client_key: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+            local ca_cert=$(grep -A 20 "^nats:" "$config_file" | grep -A 10 "tls:" | grep "ca_cert:" | sed 's/.*ca_cert: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+            
+            local tls_errors=0
+            
+            if [[ -z "$client_cert" ]]; then
+                log_error "❌ nats.tls.client_cert not configured (required for TLS URL)"
+                ((errors++))
+                ((tls_errors++))
+            else
+                log_info "✓ nats.tls.client_cert configured: $client_cert"
+            fi
+            
+            if [[ -z "$client_key" ]]; then
+                log_error "❌ nats.tls.client_key not configured (required for TLS URL)"
+                ((errors++))
+                ((tls_errors++))
+            else
+                log_info "✓ nats.tls.client_key configured: $client_key"
+            fi
+            
+            if [[ -z "$ca_cert" ]]; then
+                log_error "❌ nats.tls.ca_cert not configured (required for TLS URL)"
+                ((errors++))
+                ((tls_errors++))
+            else
+                log_info "✓ nats.tls.ca_cert configured: $ca_cert"
+            fi
+            
+            if [[ $tls_errors -eq 0 ]]; then
+                log_info "[OK] All NATS TLS certificates configured"
+            fi
+        else
+            log_warn "[!] NATS URL is not using TLS (consider using tls:// for production)"
+        fi
     fi
     
-    # Check for missing consul.token - if missing or empty, prompt for .env
-    if ! grep -A 10 "^consul:" "$config_file" | grep -q "token:" || grep -A 10 "^consul:" "$config_file" | grep -q "token: *$" || grep -A 10 "^consul:" "$config_file" | grep -q 'token: ""'; then
-        log_info "Consul token not configured - collecting for .env file"
-        local consul_token
-        prompt_secret_optional "Consul token" "consul_token"
-        CONSUL_TOKEN="$consul_token"
-        COLLECT_CONSUL_TOKEN=true
+    # Check for Consul configuration
+    local consul_address=$(grep -A 10 "^consul:" "$config_file" | grep "address:" | sed 's/.*address: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+    if [[ -z "$consul_address" ]]; then
+        log_error "❌ consul.address not configured in config.yaml"
+        ((errors++))
     else
-        log_info "Consul token already configured in config.yaml - skipping"
+        log_info "✓ consul.address configured: $consul_address"
+        
+        # If Consul address uses HTTPS, validate token configuration
+        if [[ "$consul_address" =~ ^https:// ]]; then
+            log_info "[HTTPS] HTTPS address detected, validating token configuration..."
+            
+            local consul_token=$(grep -A 10 "^consul:" "$config_file" | grep "token:" | sed 's/.*token: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+            
+            if [[ -z "$consul_token" ]]; then
+                log_error "❌ consul.token not configured (required for HTTPS address)"
+                ((errors++))
+            else
+                log_info "✓ consul.token configured"
+            fi
+        else
+            log_warn "[!] Consul address is not using HTTPS (consider using https:// for production)"
+            
+            # Still check if token is configured for non-HTTPS (optional but recommended)
+            local consul_token=$(grep -A 10 "^consul:" "$config_file" | grep "token:" | sed 's/.*token: *//g' | sed 's/"//g' | sed "s/'//g" | sed 's/#.*//g' | sed 's/ *$//g')
+            if [[ -n "$consul_token" ]]; then
+                log_info "✓ consul.token configured"
+            else
+                log_warn "[!] consul.token not configured (recommended for security)"
+            fi
+        fi
     fi
     
-    log_info "All required credentials checked and collected for .env file"
+    # Validate required credentials are present
+    if [[ $errors -gt 0 ]]; then
+        log_error "❌ Configuration validation failed with $errors error(s)"
+        log_error "Please configure the missing values in $config_file before proceeding"
+        return 1
+    fi
+    
+    log_info "[OK] All required credentials configured in config.yaml"
+    return 0
 }
 
-# Setup secrets and environment file
-setup_secrets() {
-    log_step "Setting up secrets and environment..."
+# Setup environment file (simplified)
+setup_environment_file() {
+    log_step "Setting up environment file..."
     
     local env_file="$MPCIUM_HOME/.env"
     
@@ -491,58 +548,27 @@ setup_secrets() {
         return 1
     fi
     
-    # Check and update config.yaml credentials if needed
-    check_and_update_config_credentials
+    # Validate config.yaml has all required credentials
+    if ! validate_config_credentials; then
+        log_error "Configuration validation failed. Please fix configuration issues before proceeding."
+        return 1
+    fi
     
     log_info "Creating environment file..."
     cat > "$env_file" << EOF
 # Mpcium Environment Variables
 # Generated on $(date)
-# WARNING: This file contains sensitive information - keep secure!
+# Note: All credentials are now configured in /etc/mpcium/config.yaml
 ENVIRONMENT=${MPCIUM_ENVIRONMENT}
 MPCIUM_NODE_NAME=${MPCIUM_NODE_NAME}
 EOF
-
-    # Only add credentials to .env if they were collected (missing from config.yaml)
-    if [[ "$COLLECT_NATS_PASSWORD" == "true" ]]; then
-        echo "NATS_PASSWORD=${NATS_PASSWORD}" >> "$env_file"
-        if [[ -z "$NATS_PASSWORD" ]]; then
-            log_info "Added NATS password (empty) to environment file"
-        else
-            log_info "Added NATS password to environment file"
-        fi
-    fi
-    
-    if [[ "$COLLECT_CONSUL_PASSWORD" == "true" ]]; then
-        echo "CONSUL_PASSWORD=${CONSUL_PASSWORD}" >> "$env_file"
-        if [[ -z "$CONSUL_PASSWORD" ]]; then
-            log_info "Added Consul password (empty) to environment file"
-        else
-            log_info "Added Consul password to environment file"
-        fi
-    fi
-    
-    if [[ "$COLLECT_CONSUL_TOKEN" == "true" ]]; then
-        echo "CONSUL_TOKEN=${CONSUL_TOKEN}" >> "$env_file"
-        if [[ -z "$CONSUL_TOKEN" ]]; then
-            log_info "Added Consul token (empty) to environment file"
-        else
-            log_info "Added Consul token to environment file"
-        fi
-    fi
 
     # Secure the environment file - only root can read/write, service user can read
     chown root:mpcium "$env_file"
     chmod 640 "$env_file"
     log_info "Environment file created at: $env_file"
     
-    # Clear sensitive variables from memory
-    [[ "$COLLECT_NATS_PASSWORD" == "true" ]] && unset NATS_PASSWORD
-    [[ "$COLLECT_CONSUL_PASSWORD" == "true" ]] && unset CONSUL_PASSWORD
-    [[ "$COLLECT_CONSUL_TOKEN" == "true" ]] && unset CONSUL_TOKEN
-    unset COLLECT_NATS_PASSWORD COLLECT_CONSUL_PASSWORD COLLECT_CONSUL_TOKEN
-    
-    log_info "Secrets setup complete"
+    log_info "Environment file setup complete"
 }
 
 # Verify deployment structure
@@ -613,7 +639,7 @@ verify_deployment() {
                     else
                         log_info "    ✓ Identity file exists: ${node_name}_identity.json"
                     fi
-                    
+                    ``
                     # Check private key file only for current node
                     # Other nodes' private keys should NOT be present for security reasons
                     local current_node_name_from_env
@@ -708,13 +734,13 @@ main() {
     log_info "Starting Mpcium configuration setup..."
     
     check_root
-    setup_environment
+    get_environment_from_config
     setup_node_name
     check_binaries
     ensure_configuration  
     create_user
     install_systemd_service
-    setup_secrets
+    setup_environment_file
     
     # Run configuration verification
     log_step "Running configuration verification..."
@@ -733,11 +759,49 @@ case "${1:-deploy}" in
     "deploy")
         main
         ;;
-    "secrets-only")
-        check_root
-        setup_environment
-        setup_node_name
-        setup_secrets
+    "validate-only")
+        validate_config_credentials
+        ;;
+    "validate-config")
+        log_info "Config file validation utility"
+        echo
+        
+        config_path=""
+        while true; do
+            echo -e "${BLUE}[PROMPT]${NC} Enter path to config.yaml file to validate:"
+            echo -e "  ${YELLOW}Examples:${NC}"
+            echo -e "    /etc/mpcium/config.yaml"
+            echo -e "    ./config.yaml"
+            echo -e "    ./config.prod.yaml.template"
+            read -p "> " config_path
+            echo
+            
+            if [[ -z "$config_path" ]]; then
+                log_error "Path cannot be empty. Please try again."
+                continue
+            fi
+            
+            if [[ ! -f "$config_path" ]]; then
+                log_error "File not found: $config_path. Please try again."
+                continue
+            fi
+            
+            break
+        done
+        
+        log_info "Validating config file: $config_path"
+        echo
+        
+        if validate_config_credentials "$config_path"; then
+            echo
+            log_info "[SUCCESS] Config validation completed successfully!"
+            log_info "The config file is properly configured."
+        else
+            echo
+            log_error "[FAIL] Config validation failed!"
+            log_error "Please fix the configuration issues above."
+            exit 1
+        fi
         ;;
     "update-creds")
         check_root
@@ -757,7 +821,8 @@ case "${1:-deploy}" in
         echo ""
         echo "Commands:"
         echo "  deploy          Full configuration setup (default)"
-        echo "  secrets-only    Update secrets only (no service start)"
+        echo "  validate-only   Validate /etc/mpcium/config.yaml credentials only"
+        echo "  validate-config Validate any config file (prompts for path)"
         echo "  update-creds    Update service credentials only"
         echo "  verify          Verify configuration and files"
         echo "  status          Show service status"
