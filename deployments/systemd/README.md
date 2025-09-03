@@ -10,16 +10,6 @@ This directory contains deployment scripts and configurations for **production d
 
 Mpcium is a distributed threshold cryptographic system that requires multiple nodes to collaborate for secure operations. This deployment guide covers setting up a **secure, production-ready** MPC cluster with proper security hardening, systemd integration, and operational best practices.
 
-## Quick Start (Recommended)
-
-For automated deployment, use the setup script:
-
-```bash
-sudo ./setup-config.sh
-```
-
-This script handles all configuration, permissions, and service setup automatically.
-
 ## Prerequisites
 
 ### Infrastructure Requirements
@@ -99,7 +89,8 @@ On **one designated node** only:
 mpcium-cli generate-initiator --encrypt
 ```
 
-⚠️ **Important**: 
+⚠️ **Important**:
+
 - This creates an encrypted private key file with `.key.age` extension that you'll need to securely distribute to application nodes that initiate MPC operations
 - Copy the public key from `initiator_identity.json` and update the `event_initiator_pubkey` field in `/etc/mpcium/config.yaml` on **all nodes**
 
