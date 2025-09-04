@@ -13,9 +13,11 @@ consul:
   token: ""
   password: ""
 
-mpc_threshold: 2
+mpc_threshold: 1
 environment: production # Set to production for production environment
 backup_enabled: true
+event_initiator_pubkey: ""
+event_initiator_algorithm: ed25519 # ed25519 or p256 
 backup_period_seconds: 300 # Seconds
 backup_dir: backups
 max_concurrent_keygen: 2
