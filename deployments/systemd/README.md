@@ -31,18 +31,86 @@ Mpcium is a distributed threshold cryptographic system that requires multiple no
 
 Follow these steps for manual deployment across your cluster:
 
-#### Step 1: Prepare Environment
+#### Step 1: Install Go
+
+Before installing Mpcium, you need Go 1.25+ installed on all nodes.
+
+**Download Go Binaries with wget:**
+
+For amd64 (x86_64):
 
 ```bash
-# Install Mpcium binaries
-sudo make install
+wget https://go.dev/dl/go1.25.0.linux-amd64.tar.gz
+```
+
+For arm64 (AArch64, e.g. Graviton or Apple M1/M2 Linux VMs):
+
+```bash
+wget https://go.dev/dl/go1.25.0.linux-arm64.tar.gz
+```
+
+**Extract to /usr/local:**
+
+Remove any old Go installation first:
+
+```bash
+sudo rm -rf /usr/local/go
+```
+
+Extract the archive:
+
+```bash
+# For amd64
+sudo tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz
+
+# For arm64
+sudo tar -C /usr/local -xzf go1.25.0.linux-arm64.tar.gz
+```
+
+**Update PATH:**
+
+Add Go binary to your environment. Edit `~/.bashrc` or `~/.zshrc`:
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+```
+
+Reload shell:
+
+```bash
+source ~/.bashrc
+```
+
+**Verify Installation:**
+
+```bash
+go version
+```
+
+You should see:
+
+```
+go version go1.25.0 linux/amd64
+```
+
+or
+
+```
+go version go1.25.0 linux/arm64
+```
+
+#### Step 2: Prepare Environment
+
+```bash
+# Install Mpcium binaries (preserve environment to access Go)
+sudo -E make install
 
 # Create system user and directories
 sudo useradd -r -s /bin/false -d /opt/mpcium -c "Mpcium MPC Node" mpcium
 sudo mkdir -p /opt/mpcium /etc/mpcium
 ```
 
-#### Step 2: Configure Permissions
+#### Step 3: Configure Permissions
 
 ```bash
 # Application data directories (service-owned)
@@ -55,7 +123,7 @@ sudo chown root:mpcium /etc/mpcium
 sudo chmod 750 /etc/mpcium
 ```
 
-#### Step 3: Generate Peer Configuration
+#### Step 4: Generate Peer Configuration
 
 On **one designated node** only:
 
@@ -64,7 +132,7 @@ cd /opt/mpcium
 mpcium-cli generate-peers -n 3
 ```
 
-#### Step 4: Copy Config and Update Configuration
+#### Step 5: Copy Config and Update Configuration
 
 ```bash
 # Copy configuration template
@@ -81,7 +149,7 @@ Edit `/etc/mpcium/config.yaml` to include:
 - MPC threshold settings (`mpc_threshold`)
 - Event initiator public key (will be updated in Step 5)
 
-#### Step 5: Generate Event Initiator Key
+#### Step 6: Generate Event Initiator Key
 
 On **one designated node** only:
 
@@ -94,7 +162,7 @@ mpcium-cli generate-initiator --encrypt
 - This creates an encrypted private key file with `.key.age` extension that you'll need to securely distribute to application nodes that initiate MPC operations
 - Copy the public key from `initiator_identity.json` and update the `event_initiator_pubkey` field in `/etc/mpcium/config.yaml` on **all nodes**
 
-#### Step 6: Configure Each Node
+#### Step 7: Configure Each Node
 
 ```bash
 # Register peers
@@ -104,9 +172,9 @@ mpcium-cli register-peers
 mpcium-cli generate-identity --encrypt
 ```
 
-#### Step 7: Generate TLS Certificates
+#### Step 8: Generate TLS Certificates
 
-#### Step 8: Configure Database Encryption
+#### Step 9: Configure Database Encryption
 
 ```bash
 cd ~/mpcium/deployments
@@ -115,13 +183,13 @@ cd ~/mpcium/deployments
 # ⚠️ IMPORTANT: Backup password to secure storage (e.g., Bitwarden)
 ```
 
-#### Step 9: Deploy Service
+#### Step 10: Deploy Service
 
 ```bash
 sudo ./setup-config.sh
 ```
 
-#### Step 10: Verify Deployment
+#### Step 11: Verify Deployment
 
 ```bash
 # Check service status
