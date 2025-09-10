@@ -168,8 +168,8 @@ mpcium-cli generate-initiator --encrypt
 # Register peers
 mpcium-cli register-peers --config /etc/mpcium/config.yaml --environment production
 
-# Generate node identity (with encryption)
-mpcium-cli generate-identity --encrypt
+# Generate node identity (with encryption) - replace node0 with actual node name
+mpcium-cli generate-identity --node node0 --encrypt
 ```
 
 #### Step 8: Generate TLS Certificates
