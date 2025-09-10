@@ -166,7 +166,7 @@ mpcium-cli generate-initiator --encrypt
 
 ```bash
 # Register peers
-mpcium-cli register-peers
+mpcium-cli register-peers --config /etc/mpcium/config.yaml --environment production
 
 # Generate node identity (with encryption)
 mpcium-cli generate-identity --encrypt
@@ -205,14 +205,45 @@ After deployment, the following directory structure is created:
 
 ```
 /opt/mpcium/           # Application home (mpcium:mpcium, 750)
+├── certs/             # TLS certificates
+│   ├── client-cert.pem
+│   ├── client-key.pem
+│   └── rootCA.pem
 ├── db/                # BadgerDB storage (auto-created)
 ├── backups/           # Encrypted backups (auto-created)
 ├── identity/          # Node identity files (auto-created)
+│   ├── node0_identity.json
+│   ├── node1_identity.json
+│   ├── node2_identity.json
+│   └── node{X}_private.key  # Current node's private key
+├── peers.json         # Peer registry
 └── .env               # Environment variables
 
 /etc/mpcium/           # Configuration (root:mpcium, 750)
 └── config.yaml        # Main configuration (root:mpcium, 640)
 ```
+
+### Identity Directory Examples
+
+**Node 0 (unencrypted private key):**
+```
+/opt/mpcium/identity/
+├── node0_identity.json
+├── node0_private.key      # This node's private key
+├── node1_identity.json
+└── node2_identity.json
+```
+*Generated with:* `mpcium-cli generate-identity --node node0 --config /etc/mpcium/config.yaml`
+
+**Node 1 (encrypted private key):**
+```
+/opt/mpcium/identity/
+├── node0_identity.json
+├── node1_identity.json
+├── node1_private.key.age  # This node's encrypted private key
+└── node2_identity.json
+```
+*Generated with:* `mpcium-cli generate-identity --node node1 --config /etc/mpcium/config.yaml --encrypt`
 
 ## Security Considerations
 
