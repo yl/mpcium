@@ -18,6 +18,11 @@ func registerPeers(ctx context.Context, c *cli.Command) error {
 	inputPath := c.String("peers")
 	environment := c.String("environment")
 
+	// If no peers path specified, check for peers.json in current directory
+	if inputPath == "" {
+		inputPath = "peers.json"
+	}
+
 	// Hardcoded prefix for MPC peers in Consul
 	prefix := "mpc_peers/"
 
@@ -28,6 +33,9 @@ func registerPeers(ctx context.Context, c *cli.Command) error {
 
 	// Check if input file exists
 	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		if inputPath == "peers.json" {
+			return fmt.Errorf("peers.json not found in current directory. Please specify the path using --peers flag or create peers.json in the current directory")
+		}
 		return fmt.Errorf("input file %s does not exist", inputPath)
 	}
 

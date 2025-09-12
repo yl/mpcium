@@ -53,8 +53,8 @@ func main() {
 					&cli.StringFlag{
 						Name:     "peers",
 						Aliases:  []string{"p"},
-						Usage:    "Path to peers.json file",
-						Required: true,
+						Usage:    "Path to peers.json file (defaults to ./peers.json)",
+						Required: false,
 					},
 					&cli.StringFlag{
 						Name:    "environment",
