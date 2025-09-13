@@ -268,7 +268,8 @@ func loadPrivateKey(identityDir, nodeName string, decrypt bool, agePasswordFile 
 	if decrypt {
 		// Use the encrypted age file
 		if _, err := os.Stat(encryptedKeyPath); err != nil {
-			return "", fmt.Errorf("no encrypted private key found for node %s", nodeName)
+			return "", fmt.Errorf("failed to check encrypted private key for node %s at %s: %w",
+				nodeName, encryptedKeyPath, err)
 		}
 
 		logger.Infof("Using age-encrypted private key for %s", nodeName)

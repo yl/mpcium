@@ -26,9 +26,9 @@ func TestAppConfig_MarshalJSONMask(t *testing.T) {
 	masked := config.MarshalJSONMask()
 
 	// Verify that sensitive data is masked
-	assert.Contains(t, masked, "localhost:8500") // Address should not be masked
-	assert.Contains(t, masked, "admin")          // Username should not be masked
-	assert.Contains(t, masked, "nats_user")      // Username should not be masked
+	assert.Contains(t, masked, "localhost:8500")        // Address should not be masked
+	assert.Contains(t, masked, "admin")                 // Username should not be masked
+	assert.Contains(t, masked, "nats_user")             // Username should not be masked
 	assert.Contains(t, masked, "nats://localhost:4222") // URL should not be masked
 
 	// Verify that passwords are masked
@@ -120,4 +120,58 @@ func TestAppConfig_PartialConfig(t *testing.T) {
 	assert.Contains(t, masked, "localhost:8500")
 	assert.NotContains(t, masked, "test")
 	assert.Contains(t, masked, "****") // masked badger password
+}
+
+func TestValidateEnvironment(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment string
+		wantErr     bool
+	}{
+		{
+			name:        "valid production environment",
+			environment: "production",
+			wantErr:     false,
+		},
+		{
+			name:        "valid development environment",
+			environment: "development",
+			wantErr:     false,
+		},
+		{
+			name:        "invalid environment",
+			environment: "staging",
+			wantErr:     true,
+		},
+		{
+			name:        "empty environment",
+			environment: "",
+			wantErr:     true,
+		},
+		{
+			name:        "case sensitive - Production",
+			environment: "Production",
+			wantErr:     true,
+		},
+		{
+			name:        "case sensitive - PRODUCTION",
+			environment: "PRODUCTION",
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateEnvironment(tt.environment)
+			if tt.wantErr {
+				assert.Error(t, err)
+				if err != nil {
+					assert.Contains(t, err.Error(), "invalid environment")
+					assert.Contains(t, err.Error(), "production, development")
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

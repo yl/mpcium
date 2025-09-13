@@ -113,7 +113,9 @@ func runNode(ctx context.Context, c *cli.Command) error {
 
 	viper.SetDefault("backup_enabled", true)
 	config.InitViperConfig(configPath)
-	environment := viper.GetString("environment")
+
+	appConfig := config.LoadConfig()
+	environment := appConfig.Environment
 	logger.Init(environment, debug)
 
 	// Handle password file if provided
@@ -127,7 +129,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 		promptForSensitiveCredentials()
 	} else {
 		// Validate the config values
-		checkRequiredConfigValues()
+		checkRequiredConfigValues(appConfig)
 	}
 
 	consulClient := infra.GetConsulClient(environment)
@@ -135,7 +137,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 	peers := LoadPeersFromConsul(consulClient)
 	nodeID := GetIDFromName(nodeName, peers)
 
-	badgerKV := NewBadgerKV(nodeName, nodeID)
+	badgerKV := NewBadgerKV(nodeName, nodeID, appConfig)
 	defer badgerKV.Close()
 
 	// Start background backup job
@@ -151,7 +153,7 @@ func runNode(ctx context.Context, c *cli.Command) error {
 		logger.Fatal("Failed to create identity store", err)
 	}
 
-	natsConn, err := GetNATSConnection(environment)
+	natsConn, err := GetNATSConnection(environment, appConfig)
 	if err != nil {
 		logger.Fatal("Failed to connect to NATS", err)
 	}
@@ -388,9 +390,9 @@ func maskString(s string) string {
 }
 
 // Check required configuration values are present
-func checkRequiredConfigValues() {
+func checkRequiredConfigValues(appConfig *config.AppConfig) {
 	// Show warning if we're using file-based config but no password is set
-	if viper.GetString("badger_password") == "" {
+	if appConfig.BadgerPassword == "" {
 		logger.Fatal("Badger password is required", nil)
 	}
 
@@ -441,7 +443,7 @@ func GetIDFromName(name string, peers []config.Peer) string {
 	return nodeID
 }
 
-func NewBadgerKV(nodeName, nodeID string) *kvstore.BadgerKVStore {
+func NewBadgerKV(nodeName, nodeID string, appConfig *config.AppConfig) *kvstore.BadgerKVStore {
 	// Badger KV DB
 	// Use configured db_path or default to current directory + "db"
 	basePath := viper.GetString("db_path")
@@ -459,8 +461,8 @@ func NewBadgerKV(nodeName, nodeID string) *kvstore.BadgerKVStore {
 	// Create BadgerConfig struct
 	config := kvstore.BadgerConfig{
 		NodeID:              nodeName,
-		EncryptionKey:       []byte(viper.GetString("badger_password")),
-		BackupEncryptionKey: []byte(viper.GetString("badger_password")), // Using same key for backup encryption
+		EncryptionKey:       []byte(appConfig.BadgerPassword),
+		BackupEncryptionKey: []byte(appConfig.BadgerPassword), // Using same key for backup encryption
 		BackupDir:           backupDir,
 		DBPath:              dbPath,
 	}
@@ -499,8 +501,8 @@ func StartPeriodicBackup(ctx context.Context, badgerKV *kvstore.BadgerKVStore, p
 	return backupCancel
 }
 
-func GetNATSConnection(environment string) (*nats.Conn, error) {
-	url := viper.GetString("nats.url")
+func GetNATSConnection(environment string, appConfig *config.AppConfig) (*nats.Conn, error) {
+	url := appConfig.NATs.URL
 	opts := []nats.Option{
 		nats.MaxReconnects(-1), // retry forever
 		nats.ReconnectWait(2 * time.Second),
@@ -517,9 +519,12 @@ func GetNATSConnection(environment string) (*nats.Conn, error) {
 
 	if environment == constant.EnvProduction {
 		// Load TLS config from configuration
-		clientCert := viper.GetString("nats.tls.client_cert")
-		clientKey := viper.GetString("nats.tls.client_key")
-		caCert := viper.GetString("nats.tls.ca_cert")
+		var clientCert, clientKey, caCert string
+		if appConfig.NATs.TLS != nil {
+			clientCert = appConfig.NATs.TLS.ClientCert
+			clientKey = appConfig.NATs.TLS.ClientKey
+			caCert = appConfig.NATs.TLS.CACert
+		}
 
 		// Fallback to default paths if not configured
 		if clientCert == "" {
@@ -535,7 +540,7 @@ func GetNATSConnection(environment string) (*nats.Conn, error) {
 		opts = append(opts,
 			nats.ClientCert(clientCert, clientKey),
 			nats.RootCAs(caCert),
-			nats.UserInfo(viper.GetString("nats.username"), viper.GetString("nats.password")),
+			nats.UserInfo(appConfig.NATs.Username, appConfig.NATs.Password),
 		)
 	}
 

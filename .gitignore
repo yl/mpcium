@@ -21,3 +21,4 @@ node1
 node2
 config.yaml
 .vscode
+.vagrant

@@ -51,10 +51,10 @@ func main() {
 				Action: registerPeers,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
-						Name:    "input",
-						Aliases: []string{"i"},
-						Usage:   "Input peers JSON file path (default: peers.json)",
-						Value:   peersFileName,
+						Name:     "peers",
+						Aliases:  []string{"p"},
+						Usage:    "Path to peers.json file (defaults to ./peers.json)",
+						Required: false,
 					},
 					&cli.StringFlag{
 						Name:    "environment",

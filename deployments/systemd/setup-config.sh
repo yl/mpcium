@@ -109,29 +109,6 @@ check_root() {
     fi
 }
 
-# Get environment from config.yaml
-get_environment_from_config() {
-    log_step "Reading environment from config.yaml..."
-    
-    local config_file="/etc/mpcium/config.yaml"
-    
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found at $config_file"
-        exit 1
-    fi
-    
-    # Extract environment from config.yaml
-    local environment=$(grep "^environment:" "$config_file" | sed 's/environment: *//g' | sed 's/"//g' | sed "s/'//g")
-    
-    if [[ -z "$environment" ]]; then
-        environment="production" # default
-        log_warn "Environment not specified in config.yaml, defaulting to production"
-    fi
-    
-    # Store the environment for later use
-    MPCIUM_ENVIRONMENT="$environment"
-    log_info "Environment from config.yaml: $MPCIUM_ENVIRONMENT"
-}
 
 # Prompt for MPCIUM_NODE_NAME if not provided
 setup_node_name() {
@@ -559,7 +536,6 @@ setup_environment_file() {
 # Mpcium Environment Variables
 # Generated on $(date)
 # Note: All credentials are now configured in /etc/mpcium/config.yaml
-ENVIRONMENT=${MPCIUM_ENVIRONMENT}
 MPCIUM_NODE_NAME=${MPCIUM_NODE_NAME}
 EOF
 
@@ -734,7 +710,6 @@ main() {
     log_info "Starting Mpcium configuration setup..."
     
     check_root
-    get_environment_from_config
     setup_node_name
     check_binaries
     ensure_configuration  
